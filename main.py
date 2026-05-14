@@ -8,15 +8,15 @@ import google.generativeai as genai
 # --- CONFIGURACIÓN ---
 st.set_page_config(page_title="Guardian Pro", page_icon="🛡️", layout="wide")
 
-# --- CONEXIÓN IA (CAMBIO A MODELO PRO) ---
+# --- CONEXIÓN IA REFORZADA ---
 api_key = st.secrets.get("GEMINI_API_KEY")
 model_ai = None
 
 if api_key:
     try:
         genai.configure(api_key=api_key)
-        # Cambiamos a 'gemini-pro' que es el modelo más compatible universalmente
-        model_ai = genai.GenerativeModel('gemini-pro')
+        # Usamos el nombre completo del modelo para máxima compatibilidad
+        model_ai = genai.GenerativeModel('models/gemini-1.5-flash-latest')
     except Exception as e:
         st.error(f"Error de Configuración: {e}")
 else:
@@ -82,30 +82,29 @@ with tabs[1]:
 with tabs[2]:
     st.subheader("🕵️ Chat con tu Analista")
     if model_ai:
-        user_ask = st.text_input("Pregunta lo que quieras sobre tus saldos:")
+        user_ask = st.text_input("Escribe tu pregunta:")
         if user_ask:
-            ctx = f"Saldos actuales: Mach ${saldos['MACH']}, Billetera ${saldos['BILLETERA']}, Destacame ${saldos['DESTACAME']}. Total patrimonio: ${total_patrimonio}."
-            with st.spinner("Conectando con el cerebro de Google..."):
+            ctx = f"Saldos: Mach ${saldos['MACH']}, Billetera ${saldos['BILLETERA']}, Destacame ${saldos['DESTACAME']}. Total: ${total_patrimonio}."
+            with st.spinner("Analizando información..."):
                 try:
-                    # Usamos una estructura de prompt más sencilla
-                    full_prompt = f"Actúa como analista financiero. Contexto: {ctx}. Pregunta del usuario: {user_ask}. Responde de forma directa y útil."
-                    response = model_ai.generate_content(full_prompt)
+                    # Agregamos 'models/' al inicio del nombre si es necesario
+                    response = model_ai.generate_content(f"Contexto: {ctx}. Pregunta: {user_ask}")
                     st.info(f"🤖 **Analista:** {response.text}")
                 except Exception as e:
-                    st.error(f"Error de respuesta: {e}")
+                    st.error(f"Error detectado: {e}")
+                    st.info("💡 Sugerencia: Si el error persiste, genera una nueva API Key en Google AI Studio.")
     else:
-        st.error("❌ IA DESACTIVADA: Revisa tu API KEY.")
+        st.error("❌ IA DESACTIVADA")
 
 with tabs[3]:
     st.subheader("Simulador de Meta")
     m_f = st.number_input("Gasto a simular $", min_value=0)
     if st.button("¿Es viable?"):
         if (total_patrimonio - m_f) < 100000:
-            st.error(f"❌ RECHAZADO. Debes proteger tus $100.000 de ahorro.")
+            st.error(f"❌ RECHAZADO. Tu saldo bajaría de los $100.000 de ahorro.")
         else:
-            st.success(f"✅ PERMITIDO. No afectas tu meta principal.")
+            st.success(f"✅ PERMITIDO. No comprometes tu meta.")
 
 if st.sidebar.button("🗑️ REINICIAR TODO"):
-    if os.path.exists(FILE_DB): 
-        os.remove(FILE_DB)
+    if os.path.exists(FILE_DB): os.remove(FILE_DB)
     st.rerun()
