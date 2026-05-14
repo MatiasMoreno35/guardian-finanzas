@@ -8,15 +8,15 @@ import google.generativeai as genai
 # --- CONFIGURACIÓN ---
 st.set_page_config(page_title="Guardian Pro", page_icon="🛡️", layout="wide")
 
-# --- CONEXIÓN IA REFORZADA ---
+# --- CONEXIÓN IA (CAMBIO A MODELO PRO) ---
 api_key = st.secrets.get("GEMINI_API_KEY")
 model_ai = None
 
 if api_key:
     try:
         genai.configure(api_key=api_key)
-        # Usamos 1.5-flash que es el más estable actualmente
-        model_ai = genai.GenerativeModel('gemini-1.5-flash')
+        # Cambiamos a 'gemini-pro' que es el modelo más compatible universalmente
+        model_ai = genai.GenerativeModel('gemini-pro')
     except Exception as e:
         st.error(f"Error de Configuración: {e}")
 else:
@@ -70,41 +70,42 @@ with tabs[1]:
     cols[2].metric("Destácame", f"${saldos['DESTACAME']:,.0f}")
     
     st.divider()
-    st.subheader("Resumen de Gastos Detallado")
+    st.subheader("Resumen de Gastos por Categoría")
     g_df = df_mov[df_mov['TIPO'] == 'GASTO']
     if not g_df.empty:
         res = g_df.groupby('CATEGORIA')['MONTO'].sum().reset_index()
         st.table(res.style.format({"MONTO": "${:,.0f}"}))
     
-    st.subheader("Historial de Movimientos")
+    st.subheader("Historial Reciente")
     st.dataframe(df_mov.sort_values(by="FECHA", ascending=False), use_container_width=True)
 
 with tabs[2]:
     st.subheader("🕵️ Chat con tu Analista")
     if model_ai:
-        user_ask = st.text_input("Escribe tu duda (Ej: ¿Cuánto dinero tengo en total?)")
+        user_ask = st.text_input("Pregunta lo que quieras sobre tus saldos:")
         if user_ask:
-            # Contexto ultra-simplificado para evitar errores de procesamiento
-            ctx = f"Saldos: Mach ${saldos['MACH']}, Billetera ${saldos['BILLETERA']}, Destacame ${saldos['DESTACAME']}. Total: ${total_patrimonio}."
-            with st.spinner("Pensando..."):
+            ctx = f"Saldos actuales: Mach ${saldos['MACH']}, Billetera ${saldos['BILLETERA']}, Destacame ${saldos['DESTACAME']}. Total patrimonio: ${total_patrimonio}."
+            with st.spinner("Conectando con el cerebro de Google..."):
                 try:
-                    # Intento de respuesta directa
-                    response = model_ai.generate_content(f"Usuario: Francisco. Datos: {ctx}. Pregunta: {user_ask}. Responde en 2 frases.")
+                    # Usamos una estructura de prompt más sencilla
+                    full_prompt = f"Actúa como analista financiero. Contexto: {ctx}. Pregunta del usuario: {user_ask}. Responde de forma directa y útil."
+                    response = model_ai.generate_content(full_prompt)
                     st.info(f"🤖 **Analista:** {response.text}")
                 except Exception as e:
-                    st.error(f"Error de respuesta: La API Key de Google podría estar restringida o ser inválida. Detalle: {e}")
+                    st.error(f"Error de respuesta: {e}")
     else:
-        st.error("❌ IA DESACTIVADA: No hay API KEY válida en los Secrets.")
+        st.error("❌ IA DESACTIVADA: Revisa tu API KEY.")
 
 with tabs[3]:
     st.subheader("Simulador de Meta")
     m_f = st.number_input("Gasto a simular $", min_value=0)
     if st.button("¿Es viable?"):
         if (total_patrimonio - m_f) < 100000:
-            st.error(f"❌ RECHAZADO. Debes mantener al menos $100.000 ahorrados.")
+            st.error(f"❌ RECHAZADO. Debes proteger tus $100.000 de ahorro.")
         else:
-            st.success(f"✅ PERMITIDO. Tu ahorro está seguro.")
+            st.success(f"✅ PERMITIDO. No afectas tu meta principal.")
 
-if st.sidebar.button("🗑️ REINICIAR DATOS"):
-    if os.path.exists(FILE_DB): os.remove(FILE_DB)
+if st.sidebar.button("🗑️ REINICIAR TODO"):
+    if os.path.exists(FILE_DB): 
+        os.remove(FILE_DB)
     st.rerun()
