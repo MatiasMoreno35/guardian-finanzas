@@ -16,7 +16,7 @@ FILE_CONFIG = "config_usuario.csv"
 if os.path.exists(FILE_CONFIG):
     config = pd.read_csv(FILE_CONFIG).iloc[0].to_dict()
     USER_NAME = config["nombre"]
-    # La meta se carga del archivo, pero se puede modificar en el estado de la sesión
+    # Forzamos que la meta siempre sea float para evitar el error de tipos mixtos
     if "meta_dinamica" not in st.session_state:
         st.session_state.meta_dinamica = float(config["meta"])
     CUENTAS_LISTA = [c.strip() for c in config["cuentas"].split(",")]
@@ -26,12 +26,12 @@ else:
     st.title("🚀 Configuración Inicial")
     with st.form("config_form"):
         nombre = st.text_input("¿Cómo te llamas?", "Francisco Moreno")
-        meta = st.number_input("Meta de ahorro mensual", value=100000)
+        meta = st.number_input("Meta de ahorro mensual", value=100000.0) # Forzado a float con el .0
         nombres_ctas = st.text_input("Tus cuentas (ej: Billetera, Mach, Destacame)", "Billetera, Mach, Destacame")
         cat_v = st.text_input("Gastos con VENCIMIENTO", "Colegio, Cuentas, Cuotas")
         cat_d = st.text_input("Gastos DIARIOS", "Transporte, Comida, Varios")
         if st.form_submit_button("Guardar Configuración"):
-            pd.DataFrame([{"nombre": nombre, "meta": meta, "cuentas": nombres_ctas, 
+            pd.DataFrame([{"nombre": nombre, "meta": float(meta), "cuentas": nombres_ctas, 
                            "cat_vencimiento": cat_v, "cat_diarias": cat_d}]).to_csv(FILE_CONFIG, index=False)
             st.rerun()
     st.stop()
@@ -67,8 +67,8 @@ total_capital = sum(saldos[c] for c in CUENTAS_LISTA)
 c_meta, c_reiniciar = st.columns([3, 1])
 
 with c_meta:
-    # Meta modificable dinámicamente
-    st.session_state.meta_dinamica = st.number_input("🎯 Meta de Ahorro Actual:", value=st.session_state.meta_dinamica, step=10000)
+    # Usamos explícitamente step como float (10000.0) para mantener consistencia
+    st.session_state.meta_dinamica = st.number_input("🎯 Meta de Ahorro Actual:", value=st.session_state.meta_dinamica, step=10000.0)
 
 with c_reiniciar:
     if st.button("🚨 Reiniciar Sistema", use_container_width=True):
@@ -78,7 +78,7 @@ if st.session_state.get("confirmar_reinicio"):
     st.warning("¿Qué deseas reiniciar?")
     col1, col2, col3 = st.columns(3)
     if col1.button("Limpiar Movimientos"):
-        os.remove(FILE_DB)
+        if os.path.exists(FILE_DB): os.remove(FILE_DB)
         del st.session_state.confirmar_reinicio
         st.rerun()
     if col2.button("Borrar Todo (Config + Datos)"):
@@ -116,13 +116,17 @@ with tabs[0]:
     if st.button("💾 GUARDAR REGISTRO", use_container_width=True):
         clean_mto = raw_mto.replace(".", "").replace(",", "")
         if clean_mto.isdigit() and int(clean_mto) > 0:
-            nuevo = pd.DataFrame([[str(f_fec), t_op, f_cta, f_cat, f_des, int(clean_mto)]], columns=df_mov.columns)
+            monto_final = int(clean_mto)
+            nuevo = pd.DataFrame([[str(f_fec), t_op, f_cta, f_cat, f_des, monto_final]], columns=df_mov.columns)
             pd.concat([df_mov, nuevo], ignore_index=True).to_csv(FILE_DB, index=False)
             
             if t_op == "GASTO" and f_cat in CAT_VENC:
                 f_l = str(f_fec).replace("-", "")
                 p = urllib.parse.urlencode({"action":"TEMPLATE","text":f"PAGAR {f_des}","dates":f"{f_l}/{f_l}"})
-                st.success(f"✅ Registrado. [Calendar]({cal_url})")
+                cal_url = f"https://www.google.com/calendar/render?{p}"
+                st.success(f"✅ Registrado. [Agendar en Calendar]({cal_url})")
+            else:
+                st.success("✅ Registrado correctamente")
             
             st.session_state.form_tick += 1
             st.rerun()
@@ -133,29 +137,30 @@ with tabs[1]:
     with col_a1:
         st.write("**Depositar en Ahorro**")
         acc_ori = st.selectbox("Desde:", CUENTAS_LISTA, key="acc_ori")
-        mto_dep = st.number_input("Monto:", min_value=0, step=5000, key="dep")
+        mto_dep = st.number_input("Monto:", min_value=0.0, step=5000.0, key="dep")
         if st.button("💰 DEPOSITAR"):
-            mov = pd.DataFrame([[str(datetime.now().date()), "DEPOSITO AHORRO", acc_ori, "AHORRO 🏦", "TRASPASO", mto_dep]], columns=df_mov.columns)
-            pd.concat([df_mov, mov], ignore_index=True).to_csv(FILE_DB, index=False)
-            st.rerun()
+            if mto_dep > 0:
+                mov = pd.DataFrame([[str(datetime.now().date()), "DEPOSITO AHORRO", acc_ori, "AHORRO 🏦", "TRASPASO", int(mto_dep)]], columns=df_mov.columns)
+                pd.concat([df_mov, mov], ignore_index=True).to_csv(FILE_DB, index=False)
+                st.rerun()
     with col_a2:
         st.write("**Retirar de Ahorro**")
         acc_des = st.selectbox("Hacia:", CUENTAS_LISTA, key="acc_des")
-        mto_ret = st.number_input("Monto:", min_value=0, step=5000, key="ret")
+        mto_ret = st.number_input("Monto:", min_value=0.0, step=5000.0, key="ret")
         if st.button("💸 RETIRAR"):
-            mov = pd.DataFrame([[str(datetime.now().date()), "RETIRO AHORRO", acc_des, "AHORRO 🏦", "RETIRO", mto_ret]], columns=df_mov.columns)
-            pd.concat([df_mov, mov], ignore_index=True).to_csv(FILE_DB, index=False)
-            st.rerun()
+            if mto_ret > 0:
+                mov = pd.DataFrame([[str(datetime.now().date()), "RETIRO AHORRO", acc_des, "AHORRO 🏦", "RETIRO", int(mto_ret)]], columns=df_mov.columns)
+                pd.concat([df_mov, mov], ignore_index=True).to_csv(FILE_DB, index=False)
+                st.rerun()
 
 with tabs[2]:
     st.subheader("Estado Financiero")
     
-    # Botón Deshacer
     if not df_mov.empty:
         if st.button("🔙 DESHACER ÚLTIMO REGISTRO", type="primary"):
-            df_mov = df_mov[:-1]
-            df_mov.to_csv(FILE_DB, index=False)
-            st.warning("Último registro eliminado.")
+            df_actual = pd.read_csv(FILE_DB)
+            df_actual = df_actual[:-1]
+            df_actual.to_csv(FILE_DB, index=False)
             st.rerun()
 
     cols_cta = st.columns(len(CUENTAS_LISTA))
@@ -166,7 +171,6 @@ with tabs[2]:
     c_cap, c_aho = st.columns(2)
     c_cap.metric("CAPITAL TOTAL DISPONIBLE", f"${total_capital:,.0f}")
     
-    # Delta comparado con la meta dinámica
     diff_meta = saldos['Ahorro'] - st.session_state.meta_dinamica
     c_aho.metric("SALDO EN AHORRO", f"${saldos['Ahorro']:,.0f}", delta=f"{diff_meta:,.0f} vs Meta")
     
@@ -177,7 +181,7 @@ with tabs[3]:
     api_key = st.secrets.get("GROQ_API_KEY")
     if api_key:
         client = Groq(api_key=api_key)
-        user_ask = st.text_input(f"{USER_NAME}, ¿qué quieres analizar hoy?")
+        user_ask = st.text_input(f"Francisco, ¿qué quieres analizar hoy?")
         if user_ask:
             ctx = f"Capital: {total_capital}, Ahorro: {saldos['Ahorro']}, Meta: {st.session_state.meta_dinamica}."
             chat = client.chat.completions.create(
