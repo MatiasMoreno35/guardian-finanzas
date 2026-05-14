@@ -8,17 +8,9 @@ from groq import Groq
 # --- CONFIGURACIÓN ---
 st.set_page_config(page_title="Smart Wallet", page_icon="💰", layout="wide")
 
-# --- CONEXIÓN IA (GROQ) ---
+# --- CONEXIÓN IA ---
 api_key = st.secrets.get("GROQ_API_KEY")
-client = None
-
-if api_key:
-    try:
-        client = Groq(api_key=api_key)
-    except Exception as e:
-        st.error(f"Error al conectar con la IA: {e}")
-else:
-    st.warning("⚠️ No se encontró la GROQ_API_KEY en los Secrets.")
+client = Groq(api_key=api_key) if api_key else None
 
 # --- BASE DE DATOS ---
 FILE_DB = "movimientos_db.csv"
@@ -27,129 +19,105 @@ if not os.path.exists(FILE_DB):
 
 df_mov = pd.read_csv(FILE_DB)
 
-# --- SIDEBAR: META MENSUAL ---
+# --- SIDEBAR: META ---
 with st.sidebar:
     st.title("⚙️ Configuración")
-    meta_mensual = st.number_input("Meta de Ahorro Mensual", min_value=0, value=100000, step=10000)
-    st.write(f"Meta actual: **${meta_mensual:,.0f}**")
-    st.divider()
-    if st.button("🗑️ REINICIAR BASE DE DATOS"):
-        if os.path.exists(FILE_DB): 
-            os.remove(FILE_DB)
-            st.rerun()
+    meta_mensual = st.number_input("Meta de Ahorro Mensual", min_value=0, value=100000)
+    if st.button("🗑️ REINICIAR TODO"):
+        if os.path.exists(FILE_DB): os.remove(FILE_DB)
+        st.rerun()
 
-# --- CÁLCULO DE SALDOS ---
-cuentas_capital = ["Billetera física", "Cuenta Mach", "Cuenta destacame"]
-saldos = {cta: 0.0 for cta in cuentas_capital + ["Ahorro"]}
-
+# --- CÁLCULOS ---
+cuentas_cap = ["Billetera física", "Cuenta Mach", "Cuenta destacame"]
+saldos = {cta: 0.0 for cta in cuentas_cap + ["Ahorro"]}
 for _, row in df_mov.iterrows():
     try:
         m = float(row['MONTO'])
-        cta = row['CUENTA']
-        if row['TIPO'] == 'INGRESO':
-            saldos[cta] += m
-        else:
-            saldos[cta] -= m
+        saldos[row['CUENTA']] = saldos.get(row['CUENTA'], 0) + (m if row['TIPO'] == 'INGRESO' else -m)
     except: continue
-
-total_capital = sum(saldos[c] for c in cuentas_capital)
-saldo_ahorro = saldos["Ahorro"]
+total_capital = sum(saldos[c] for c in cuentas_cap)
 
 # --- INTERFAZ ---
 st.title("💳 Smart Wallet")
-
 tabs = st.tabs(["📝 REGISTRO", "📊 RESUMEN", "🕵️ ANALISTA IA"])
 
-# --- PESTAÑA 1: REGISTRO ---
 with tabs[0]:
     st.subheader("Nuevo Movimiento")
-    t_op = st.radio("Tipo de Movimiento", ["GASTO", "INGRESO"], horizontal=True)
+    t_op = st.radio("Tipo", ["GASTO", "INGRESO"], horizontal=True)
     
-    with st.form("f_reg", clear_on_submit=True):
-        if t_op == "GASTO":
-            c1, c2 = st.columns(2)
-            f_cat = c1.selectbox("Categoría", ["COLEGIO 🏫", "CUOTAS 💳", "CUENTAS 💡", "TRANSPORTE 🚗", "COMIDA 🍕", "VARIOS 🧩"])
-            
-            # Lógica de Fecha: Solo aparece si es categoría fija
-            if f_cat in ["COLEGIO 🏫", "CUOTAS 💳", "CUENTAS 💡"]:
-                f_fec = c2.date_input("Fecha de Vencimiento", datetime.now())
-            else:
-                f_fec = datetime.now().date()
-                c2.info("📅 Gasto para hoy")
-            
-            # Entrada de monto con previsualización formateada
-            raw_mto = st.text_input("Valor $ (Solo números)", value="0")
-            # Limpiamos puntos/comas por si el usuario los pone, y convertimos a int
-            try:
-                f_mto = int(raw_mto.replace(".", "").replace(",", ""))
-            except:
-                f_mto = 0
-            st.write(f"Confirmado: **${f_mto:,.0f}**")
-            
-            f_des = st.text_input("Descripción").upper()
-            f_cta_interna = "Billetera física" 
-            
+    # --- COLUMNAS DINÁMICAS ---
+    c1, c2 = st.columns(2)
+    
+    if t_op == "GASTO":
+        f_cat = c1.selectbox("Categoría", ["COLEGIO 🏫", "CUOTAS 💳", "CUENTAS 💡", "TRANSPORTE 🚗", "COMIDA 🍕", "VARIOS 🧩"], key="cat_gasto")
+        
+        # FECHA: Solo aparece si la categoría es crítica
+        if f_cat in ["COLEGIO 🏫", "CUOTAS 💳", "CUENTAS 💡"]:
+            f_fec = c2.date_input("Vencimiento", datetime.now())
         else:
-            c1, c2 = st.columns(2)
-            f_cta_interna = c1.selectbox("Destino del dinero", ["Billetera física", "Cuenta Mach", "Cuenta destacame", "Ahorro"])
+            f_fec = datetime.now().date()
+            # No se muestra nada en c2, queda limpio
+        
+        # MONTO DINÁMICO: Formateo inmediato
+        raw_mto = st.text_input("Valor $", value="", placeholder="Ej: 10000")
+        # Limpieza de puntos para procesar el número
+        clean_mto = raw_mto.replace(".", "").replace(",", "")
+        f_mto = int(clean_mto) if clean_mto.isdigit() else 0
+        
+        # Si hay un número, lo mostramos arriba del input con puntos de forma elegante
+        if f_mto > 0:
+            st.markdown(f"### ${f_mto:,.0f}")
             
-            raw_mto = c1.text_input("Monto $", value="0")
-            try:
-                f_mto = int(raw_mto.replace(".", "").replace(",", ""))
-            except:
-                f_mto = 0
-            c1.write(f"Confirmado: **${f_mto:,.0f}**")
+        f_des = st.text_input("DESCRIPCIÓN").upper()
+        f_cta_int = "Billetera física"
+        
+    else:
+        f_cta_int = c1.selectbox("Destino", ["Billetera física", "Cuenta Mach", "Cuenta destacame", "Ahorro"])
+        raw_mto = c1.text_input("Monto $", value="")
+        clean_mto = raw_mto.replace(".", "").replace(",", "")
+        f_mto = int(clean_mto) if clean_mto.isdigit() else 0
+        if f_mto > 0:
+            c1.markdown(f"### ${f_mto:,.0f}")
             
-            f_fec = c2.date_input("Fecha de Ingreso", datetime.now())
-            f_cat = "INGRESO 💰"
-            f_des = st.text_input("Descripción").upper()
+        f_fec = c2.date_input("Fecha", datetime.now())
+        f_cat = "INGRESO 💰"
+        f_des = st.text_input("DESCRIPCIÓN").upper()
 
-        if st.form_submit_button("💾 GUARDAR"):
-            nuevo = pd.DataFrame([[str(f_fec), t_op, f_cta_interna, f_cat, f_des, f_mto]], columns=df_mov.columns)
+    # BOTÓN DE GUARDADO ÚNICO
+    if st.button("💾 GUARDAR", use_container_width=True):
+        if f_mto > 0:
+            nuevo = pd.DataFrame([[str(f_fec), t_op, f_cta_int, f_cat, f_des, f_mto]], columns=df_mov.columns)
             pd.concat([df_mov, nuevo], ignore_index=True).to_csv(FILE_DB, index=False)
             
+            # Solo agendar si es gasto crítico
             if t_op == "GASTO" and f_cat in ["COLEGIO 🏫", "CUOTAS 💳", "CUENTAS 💡"]:
                 f_l = str(f_fec).replace("-", "")
-                p = urllib.parse.urlencode({"action":"TEMPLATE","text":f"PAGAR {f_des}","details":f"Monto: ${f_mto:,.0f}","dates":f"{f_l}/{f_l}"})
+                p = urllib.parse.urlencode({"action":"TEMPLATE","text":f"PAGAR {f_des}","dates":f"{f_l}/{f_l}"})
                 st.info(f"📅 [Agendar en Calendar](https://www.google.com/calendar/render?{p})")
             
-            st.success("Registrado.")
+            st.success("Registrado correctamente.")
             st.rerun()
 
-# --- PESTAÑA 2: RESUMEN ---
 with tabs[1]:
-    st.subheader("Estado de Cuentas")
-    c = st.columns(4)
-    c[0].metric("Billetera física", f"${saldos['Billetera física']:,.0f}")
-    c[1].metric("Cuenta Mach", f"${saldos['Cuenta Mach']:,.0f}")
-    c[2].metric("Cuenta destacame", f"${saldos['Cuenta destacame']:,.0f}")
-    c[3].metric("Ahorro", f"${saldo_ahorro:,.0f}")
-    
+    st.subheader("Saldos")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Billetera", f"${saldos['Billetera física']:,.0f}")
+    col2.metric("Mach", f"${saldos['Cuenta Mach']:,.0f}")
+    col3.metric("Destácame", f"${saldos['Cuenta destacame']:,.0f}")
+    col4.metric("Ahorro", f"${saldos['Ahorro']:,.0f}")
     st.divider()
-    col_cap, col_meta = st.columns(2)
-    col_cap.metric("CAPITAL TOTAL", f"${total_capital:,.0f}")
-    col_meta.metric("META MENSUAL", f"${meta_mensual:,.0f}")
-    
+    st.metric("CAPITAL TOTAL", f"${total_capital:,.0f}")
     if not df_mov.empty:
-        st.subheader("Historial")
         st.dataframe(df_mov.sort_values(by="FECHA", ascending=False), use_container_width=True)
 
-# --- PESTAÑA 3: ANALISTA IA ---
 with tabs[2]:
-    st.subheader("🕵️ Analista Smart Wallet")
+    st.subheader("🕵️ Analista IA")
     if client:
-        user_ask = st.text_input("Pregunta sobre tus gastos o presupuesto:")
+        user_ask = st.text_input("Dime, ¿qué necesitas analizar?")
         if user_ask:
-            ctx = f"Pablo Moreno tiene Capital: ${total_capital}, Ahorro aparte: ${saldo_ahorro}, Meta: ${meta_mensual}."
-            with st.spinner("Pensando..."):
-                try:
-                    chat = client.chat.completions.create(
-                        messages=[
-                            {"role": "system", "content": "Eres un analista financiero para Pablo Moreno. Usa sus datos para aconsejar sobre compras y ahorro."},
-                            {"role": "user", "content": f"Contexto: {ctx}. Pregunta: {user_ask}"}
-                        ],
-                        model="llama-3.1-8b-instant",
-                    )
-                    st.info(f"🤖 **Analista:** {chat.choices[0].message.content}")
-                except Exception as e:
-                    st.error(f"Error: {e}")
+            ctx = f"Capital: ${total_capital}, Ahorro: ${saldos['Ahorro']}, Meta: ${meta_mensual}."
+            chat = client.chat.completions.create(
+                messages=[{"role": "system", "content": "Analista de Pablo Moreno."},
+                          {"role": "user", "content": f"Contexto: {ctx}. Pregunta: {user_ask}"}],
+                model="llama-3.1-8b-instant")
+            st.info(f"🤖 {chat.choices[0].message.content}")
