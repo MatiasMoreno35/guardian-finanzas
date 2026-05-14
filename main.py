@@ -19,13 +19,25 @@ if not os.path.exists(FILE_DB):
 
 df_mov = pd.read_csv(FILE_DB)
 
-# --- GESTIÓN DE ESTADO (Para limpiar campos) ---
-if "monto_input" not in st.session_state:
-    st.session_state.monto_input = ""
-if "desc_input" not in st.session_state:
-    st.session_state.desc_input = ""
+# --- INICIALIZACIÓN DE ESTADO ---
 if "meta_ahorro" not in st.session_state:
     st.session_state.meta_ahorro = 100000
+
+# Función para limpiar campos después de guardar
+def reset_campos():
+    st.session_state["monto_input"] = ""
+    st.session_state["desc_input"] = ""
+
+# --- BOTONES SUPERIORES (ESQUINA) ---
+col_vacia, col_meta, col_reset = st.columns([2, 1, 1])
+with col_meta:
+    st.session_state.meta_ahorro = st.number_input("Meta Mensual $", min_value=0, value=st.session_state.meta_ahorro, step=10000)
+with col_reset:
+    st.write(" <br> ", unsafe_allow_html=True) # Espaciador
+    if st.button("🗑️ Reiniciar Base", use_container_width=True):
+        if os.path.exists(FILE_DB): 
+            os.remove(FILE_DB)
+            st.rerun()
 
 # --- CÁLCULOS ---
 cuentas_cap = ["Billetera física", "Cuenta Mach", "Cuenta destacame"]
@@ -37,7 +49,7 @@ for _, row in df_mov.iterrows():
     except: continue
 total_capital = sum(saldos[c] for c in cuentas_cap)
 
-# --- INTERFAZ ---
+# --- INTERFAZ PRINCIPAL ---
 st.title("💳 Smart Wallet")
 tabs = st.tabs(["📝 REGISTRO", "📊 RESUMEN", "🕵️ ANALISTA IA"])
 
@@ -50,7 +62,7 @@ with tabs[0]:
     if t_op == "GASTO":
         f_cat = c1.selectbox("Categoría", ["COLEGIO 🏫", "CUOTAS 💳", "CUENTAS 💡", "TRANSPORTE 🚗", "COMIDA 🍕", "VARIOS 🧩"])
         if f_cat in ["COLEGIO 🏫", "CUOTAS 💳", "CUENTAS 💡"]:
-            f_fec = c2.date_input("Fecha de Vencimiento", datetime.now())
+            f_fec = c2.date_input("Vencimiento", datetime.now())
         else:
             f_fec = datetime.now().date()
         
@@ -73,7 +85,7 @@ with tabs[0]:
         if f_mto > 0:
             c1.markdown(f"### **${f_mto:,.0f}**")
             
-        f_fec = c2.date_input("Fecha de Ingreso", datetime.now())
+        f_fec = c2.date_input("Fecha", datetime.now())
         f_cat = "INGRESO 💰"
         f_des = st.text_input("DESCRIPCIÓN", key="desc_input").upper()
 
@@ -82,18 +94,17 @@ with tabs[0]:
             nuevo = pd.DataFrame([[str(f_fec), t_op, f_cta_int, f_cat, f_des, f_mto]], columns=df_mov.columns)
             pd.concat([df_mov, nuevo], ignore_index=True).to_csv(FILE_DB, index=False)
             
-            # Link de Calendario
+            # Calendario
             if t_op == "GASTO" and f_cat in ["COLEGIO 🏫", "CUOTAS 💳", "CUENTAS 💡"]:
                 f_l = str(f_fec).replace("-", "")
                 p = urllib.parse.urlencode({"action":"TEMPLATE","text":f"PAGAR {f_des}","dates":f"{f_l}/{f_l}"})
                 cal_url = f"https://www.google.com/calendar/render?{p}"
-                st.success(f"✅ Registrado. [CLICK AQUÍ PARA AGENDAR EN CALENDAR]({cal_url})")
+                st.success(f"✅ Registrado. [AGENDAR EN CALENDAR]({cal_url})")
             else:
                 st.success("✅ ¡Movimiento registrado!")
             
-            # RESET de campos
-            st.session_state.monto_input = ""
-            st.session_state.desc_input = ""
+            # Resetear y refrescar
+            reset_campos()
             st.rerun()
 
 with tabs[1]:
@@ -112,23 +123,15 @@ with tabs[1]:
     if not df_mov.empty:
         st.subheader("Historial")
         st.dataframe(df_mov.sort_values(by="FECHA", ascending=False), use_container_width=True)
-    
-    st.divider()
-    st.subheader("⚙️ Ajustes de Smart Wallet")
-    st.session_state.meta_ahorro = st.number_input("Modificar Meta de Ahorro Mensual", min_value=0, value=st.session_state.meta_ahorro, step=10000)
-    if st.button("🗑️ REINICIAR TODA LA BASE DE DATOS"):
-        if os.path.exists(FILE_DB): 
-            os.remove(FILE_DB)
-            st.rerun()
 
 with tabs[2]:
     st.subheader("🕵️ Analista Smart Wallet")
     if client:
-        user_ask = st.text_input("Consulta a tu analista personal:")
+        user_ask = st.text_input("Consulta a tu analista:")
         if user_ask:
             ctx = f"Capital: ${total_capital}, Ahorro: ${saldos['Ahorro']}, Meta: ${st.session_state.meta_ahorro}."
             chat = client.chat.completions.create(
-                messages=[{"role": "system", "content": "Eres el asesor financiero de Pablo Moreno."},
+                messages=[{"role": "system", "content": "Analista financiero de Pablo Moreno."},
                           {"role": "user", "content": f"Contexto: {ctx}. Pregunta: {user_ask}"}],
                 model="llama-3.1-8b-instant")
-            st.info(f"🤖 **Analista:** {chat.choices[0].message.content}")
+            st.info(f"🤖 {chat.choices[0].message.content}")
