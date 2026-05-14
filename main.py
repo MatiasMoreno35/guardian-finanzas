@@ -10,13 +10,10 @@ st.set_page_config(page_title="Smart Wallet", page_icon="💰", layout="wide")
 
 # --- LÓGICA DE RUTAS Y MULTIUSUARIO ---
 user_id = st.query_params.get("user", "comun")
-
-# Intentamos usar el directorio actual, si falla, usamos /tmp (estándar en Streamlit Cloud)
 base_path = os.getcwd()
 if not os.access(base_path, os.W_OK):
     base_path = "/tmp"
 
-# Asegurar que el directorio existe (evita el OSError)
 if not os.path.exists(base_path):
     os.makedirs(base_path, exist_ok=True)
 
@@ -90,47 +87,36 @@ if os.path.exists(FILE_CONFIG):
         CUENTAS_LISTA = [c.strip() for c in config["cuentas"].split(",")]
         CAT_VENC = [c.strip() for c in config["cat_vencimiento"].split(",")]
         CAT_DIARIO = [c.strip() for c in config["cat_diarias"].split(",")]
-    except Exception as e:
-        st.error(f"Error cargando config: {e}")
-        if st.button("Reconfigurar"):
-            os.remove(FILE_CONFIG)
-            st.rerun()
+    except:
+        st.error("Error cargando config.")
+        if st.button("Reconfigurar"): os.remove(FILE_CONFIG); st.rerun()
         st.stop()
 else:
     st.title(f"🚀 Setup")
-    lang_setup = st.selectbox("Idioma / Língua", ["Español", "Português"])
+    lang_setup = st.selectbox("Idioma", ["Español", "Português"])
     L = "es" if lang_setup == "Español" else "pt"
     T = TEXTS[L]
-    
-    with st.form("config_form", clear_on_submit=False):
+    with st.form("config_form"):
         nombre = st.text_input(T["name_label"])
         meta = st.number_input(T["meta_label"], value=0.0)
         nombres_ctas = st.text_input(T["ctas_label"])
         cat_v = st.text_input(T["venc_label"])
         cat_d = st.text_input(T["diario_label"])
-        
-        btn_save = st.form_submit_button(T["save_config"])
-        
-        if btn_save:
-            if not all([nombre, nombres_ctas, cat_v, cat_d]):
-                st.warning("⚠️ Todos los campos son obligatorios.")
-            else:
-                try:
-                    df_conf = pd.DataFrame([{"nombre": nombre, "meta": float(meta), "cuentas": nombres_ctas, 
-                                           "cat_vencimiento": cat_v, "cat_diarias": cat_d, "idioma": L}])
-                    df_conf.to_csv(FILE_CONFIG, index=False)
-                    st.success("¡Configuración guardada!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error al guardar: {e}")
+        if st.form_submit_button(T["save_config"]):
+            if all([nombre, nombres_ctas, cat_v, cat_d]):
+                pd.DataFrame([{"nombre": nombre, "meta": float(meta), "cuentas": nombres_ctas, 
+                               "cat_vencimiento": cat_v, "cat_diarias": cat_d, "idioma": L}]).to_csv(FILE_CONFIG, index=False)
+                st.rerun()
     st.stop()
 
-# --- BASE DE DATOS MOVIMIENTOS ---
+# --- BASE DE DATOS ---
 if not os.path.exists(FILE_DB):
     pd.DataFrame(columns=['FECHA', 'TIPO', 'CUENTA', 'CATEGORIA', 'DESC', 'MONTO']).to_csv(FILE_DB, index=False)
 df_mov = pd.read_csv(FILE_DB)
 
-# --- CÁLCULOS DE SALDO ---
+# --- CÁLCULOS ---
+# Para simplificar, si no hay cuenta, usamos la primera de la lista como 'Principal'
+default_cta = CUENTAS_LISTA[0]
 saldos = {cta: 0.0 for cta in CUENTAS_LISTA + ["Ahorro"]}
 for _, row in df_mov.iterrows():
     try:
@@ -147,29 +133,13 @@ for _, row in df_mov.iterrows():
     except: continue
 total_capital = sum(saldos[c] for c in CUENTAS_LISTA)
 
-# --- INTERFAZ PRINCIPAL ---
-c_meta, c_reiniciar = st.columns([3, 1])
-with c_meta:
-    st.session_state.meta_dinamica = st.number_input(T["meta_actual"], value=st.session_state.meta_dinamica, step=10000.0)
-with c_reiniciar:
-    if st.button(T["reset_btn"], use_container_width=True):
-        st.session_state.confirmar_reinicio = True
-
-if st.session_state.get("confirmar_reinicio"):
-    c1, c2, c3 = st.columns(3)
-    if c1.button("Borrar Datos"): 
-        if os.path.exists(FILE_DB): os.remove(FILE_DB)
-        st.rerun()
-    if c2.button("Reset Total"): 
-        if os.path.exists(FILE_DB): os.remove(FILE_DB)
-        if os.path.exists(FILE_CONFIG): os.remove(FILE_CONFIG)
-        st.rerun()
-    if c3.button("Cancelar"): del st.session_state.confirmar_reinicio; st.rerun()
-
+# --- INTERFAZ ---
 st.title(f"💳 {USER_NAME} Wallet")
+st.session_state.meta_dinamica = st.number_input(T["meta_actual"], value=st.session_state.meta_dinamica, step=10000.0)
+
 tabs = st.tabs([T["tab_reg"], T["tab_aho"], T["tab_res"], T["tab_ia"]])
 
-# --- PESTAÑA 1: REGISTRO ---
+# --- REGISTRO SIMPLIFICADO ---
 with tabs[0]:
     t_op = st.radio(T["type_op"], [T["gasto"], T["ingreso"]], horizontal=True)
     c1, c2 = st.columns(2)
@@ -178,9 +148,10 @@ with tabs[0]:
         sub_t = c1.selectbox("Frecuencia", ["Vencimiento", "Diario"])
         f_cat = c1.selectbox(T["cat_label"], CAT_VENC if sub_t == "Vencimiento" else CAT_DIARIO)
         f_fec = c2.date_input("Fecha") if sub_t == "Vencimiento" else datetime.now().date()
-        f_cta = c1.selectbox("Cuenta de Origen", CUENTAS_LISTA)
+        # Se elimina la selección de cuenta de origen para gastos
+        f_cta = default_cta 
     else:
-        f_cta = c1.selectbox("Destino", CUENTAS_LISTA)
+        f_cta = c1.selectbox("Destino (Cuenta)", CUENTAS_LISTA)
         f_fec = datetime.now().date()
         f_cat = "INGRESO"
 
@@ -197,17 +168,15 @@ with tabs[0]:
             if m_tipo == "GASTO" and sub_t == "Vencimiento":
                 p = urllib.parse.urlencode({"action":"TEMPLATE","text":f"PAGAR {f_des}","dates":f"{str(f_fec).replace('-','')}/{str(f_fec).replace('-','')}"})
                 st.session_state.cal_link = f"https://www.google.com/calendar/render?{p}"
-            else:
-                st.session_state.cal_link = None
+            else: st.session_state.cal_link = None
             
-            st.success("✅ Registro guardado")
             st.session_state.form_tick = st.session_state.get('form_tick', 0) + 1
             st.rerun()
     
     if st.session_state.get("cal_link"):
         st.link_button("📅 AGENDAR EN CALENDAR", st.session_state.cal_link, use_container_width=True)
 
-# --- PESTAÑA 2: AHORROS ---
+# --- AHORROS ---
 with tabs[1]:
     col_a1, col_a2 = st.columns(2)
     with col_a1:
@@ -227,35 +196,28 @@ with tabs[1]:
                 mov = pd.DataFrame([[str(datetime.now().date()), "RETIRO AHORRO", acc_des, "AHORRO", "RETIRO", int(mto_ret)]], columns=df_mov.columns)
                 pd.concat([df_mov, mov], ignore_index=True).to_csv(FILE_DB, index=False); st.rerun()
 
-# --- PESTAÑA 3: RESUMEN ---
+# --- RESUMEN ---
 with tabs[2]:
-    if not df_mov.empty and st.button(T["undo_btn"], type="secondary"):
+    if not df_mov.empty and st.button(T["undo_btn"]):
         df_mov[:-1].to_csv(FILE_DB, index=False); st.rerun()
-
-    cols_cta = st.columns(len(CUENTAS_LISTA))
-    for i, cta in enumerate(CUENTAS_LISTA):
-        cols_cta[i].metric(cta, f"${saldos[cta]:,.0f}")
     
-    st.divider()
-    c_cap, c_aho = st.columns(2)
-    c_cap.metric(T["cap_total"], f"${total_capital:,.0f}")
-    diff = saldos['Ahorro'] - st.session_state.meta_dinamica
-    c_aho.metric(T["aho_saldo"], f"${saldos['Ahorro']:,.0f}", delta=f"{diff:,.0f}")
+    st.metric(T["cap_total"], f"${total_capital:,.0f}")
+    c_aho, c_meta = st.columns(2)
+    c_aho.metric(T["aho_saldo"], f"${saldos['Ahorro']:,.0f}")
+    c_meta.metric("Diferencia Meta", f"${(saldos['Ahorro'] - st.session_state.meta_dinamica):,.0f}")
     
     st.dataframe(df_mov.sort_values(by="FECHA", ascending=False), use_container_width=True)
 
-# --- PESTAÑA 4: IA ---
+# --- IA ---
 with tabs[3]:
     api_key = st.secrets.get("GROQ_API_KEY")
     if api_key:
         client = Groq(api_key=api_key)
-        user_ask = st.text_input(f"Consulta a tu analista financiero:")
+        user_ask = st.text_input(f"Consulta a tu analista:")
         if user_ask:
             ctx = f"Capital: {total_capital}, Ahorro: {saldos['Ahorro']}, Meta: {st.session_state.meta_dinamica}"
             chat = client.chat.completions.create(
-                messages=[{"role": "system", "content": f"Eres un asesor financiero experto. Responde de forma breve y clara en {L}."},
+                messages=[{"role": "system", "content": "Asesor breve."},
                           {"role": "user", "content": f"Contexto: {ctx}. Pregunta: {user_ask}"}],
                 model="llama-3.1-8b-instant")
             st.info(chat.choices[0].message.content)
-    else:
-        st.warning("IA no configurada. Agrega la clave GROQ_API_KEY en los secretos de Streamlit.")
