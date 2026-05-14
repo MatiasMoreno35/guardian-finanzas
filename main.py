@@ -8,10 +8,18 @@ from groq import Groq
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Smart Wallet", page_icon="💰", layout="wide")
 
-# --- LÓGICA DE MULTIUSUARIO ---
+# --- LÓGICA DE RUTAS Y MULTIUSUARIO ---
 user_id = st.query_params.get("user", "comun")
-# os.getcwd() asegura que trabajamos en la carpeta raíz de la app en el servidor
+
+# Intentamos usar el directorio actual, si falla, usamos /tmp (estándar en Streamlit Cloud)
 base_path = os.getcwd()
+if not os.access(base_path, os.W_OK):
+    base_path = "/tmp"
+
+# Asegurar que el directorio existe (evita el OSError)
+if not os.path.exists(base_path):
+    os.makedirs(base_path, exist_ok=True)
+
 FILE_DB = os.path.join(base_path, f"movimientos_{user_id}.csv")
 FILE_CONFIG = os.path.join(base_path, f"config_{user_id}.csv")
 
@@ -71,42 +79,53 @@ TEXTS = {
 
 # --- CARGAR CONFIGURACIÓN ---
 if os.path.exists(FILE_CONFIG):
-    config = pd.read_csv(FILE_CONFIG).iloc[0].to_dict()
-    USER_NAME = config["nombre"]
-    L = config.get("idioma", "es")
-    T = TEXTS[L]
-    
-    if "meta_dinamica" not in st.session_state:
-        st.session_state.meta_dinamica = float(config["meta"])
-    CUENTAS_LISTA = [c.strip() for c in config["cuentas"].split(",")]
-    CAT_VENC = [c.strip() for c in config["cat_vencimiento"].split(",")]
-    CAT_DIARIO = [c.strip() for c in config["cat_diarias"].split(",")]
+    try:
+        config = pd.read_csv(FILE_CONFIG).iloc[0].to_dict()
+        USER_NAME = config["nombre"]
+        L = config.get("idioma", "es")
+        T = TEXTS[L]
+        
+        if "meta_dinamica" not in st.session_state:
+            st.session_state.meta_dinamica = float(config["meta"])
+        CUENTAS_LISTA = [c.strip() for c in config["cuentas"].split(",")]
+        CAT_VENC = [c.strip() for c in config["cat_vencimiento"].split(",")]
+        CAT_DIARIO = [c.strip() for c in config["cat_diarias"].split(",")]
+    except Exception as e:
+        st.error(f"Error cargando config: {e}")
+        if st.button("Reconfigurar"):
+            os.remove(FILE_CONFIG)
+            st.rerun()
+        st.stop()
 else:
     st.title(f"🚀 Setup")
-    lang_setup = st.selectbox("Idioma", ["Español", "Português"])
+    lang_setup = st.selectbox("Idioma / Língua", ["Español", "Português"])
     L = "es" if lang_setup == "Español" else "pt"
     T = TEXTS[L]
     
-    with st.form("config_form"):
-        # Ejemplo genérico para privacidad
-        nombre = st.text_input(T["name_label"], placeholder="Ej: Juan Pérez")
+    with st.form("config_form", clear_on_submit=False):
+        nombre = st.text_input(T["name_label"])
         meta = st.number_input(T["meta_label"], value=0.0)
-        nombres_ctas = st.text_input(T["ctas_label"], placeholder="Efectivo, Banco, App")
-        cat_v = st.text_input(T["venc_label"], placeholder="Arriendo, Internet")
-        cat_d = st.text_input(T["diario_label"], placeholder="Comida, Pasajes")
+        nombres_ctas = st.text_input(T["ctas_label"])
+        cat_v = st.text_input(T["venc_label"])
+        cat_d = st.text_input(T["diario_label"])
         
-        if st.form_submit_button(T["save_config"]):
-            # Validación para evitar que el 'Enter' accidental guarde campos vacíos
-            if not nombre or not nombres_ctas or not cat_v or not cat_d:
-                st.error("⚠️ Por favor, completa todos los campos del formulario.")
+        btn_save = st.form_submit_button(T["save_config"])
+        
+        if btn_save:
+            if not all([nombre, nombres_ctas, cat_v, cat_d]):
+                st.warning("⚠️ Todos los campos son obligatorios.")
             else:
-                pd.DataFrame([{"nombre": nombre, "meta": float(meta), "cuentas": nombres_ctas, 
-                               "cat_vencimiento": cat_v, "cat_diarias": cat_d, "idioma": L}]).to_csv(FILE_CONFIG, index=False)
-                st.success("Configuración guardada con éxito.")
-                st.rerun()
+                try:
+                    df_conf = pd.DataFrame([{"nombre": nombre, "meta": float(meta), "cuentas": nombres_ctas, 
+                                           "cat_vencimiento": cat_v, "cat_diarias": cat_d, "idioma": L}])
+                    df_conf.to_csv(FILE_CONFIG, index=False)
+                    st.success("¡Configuración guardada!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error al guardar: {e}")
     st.stop()
 
-# --- BASE DE DATOS ---
+# --- BASE DE DATOS MOVIMIENTOS ---
 if not os.path.exists(FILE_DB):
     pd.DataFrame(columns=['FECHA', 'TIPO', 'CUENTA', 'CATEGORIA', 'DESC', 'MONTO']).to_csv(FILE_DB, index=False)
 df_mov = pd.read_csv(FILE_DB)
@@ -138,12 +157,14 @@ with c_reiniciar:
 
 if st.session_state.get("confirmar_reinicio"):
     c1, c2, c3 = st.columns(3)
-    if c1.button("Borrar Datos"): os.remove(FILE_DB); st.rerun()
+    if c1.button("Borrar Datos"): 
+        if os.path.exists(FILE_DB): os.remove(FILE_DB)
+        st.rerun()
     if c2.button("Reset Total"): 
         if os.path.exists(FILE_DB): os.remove(FILE_DB)
         if os.path.exists(FILE_CONFIG): os.remove(FILE_CONFIG)
         st.rerun()
-    if c3.button("X"): del st.session_state.confirmar_reinicio; st.rerun()
+    if c3.button("Cancelar"): del st.session_state.confirmar_reinicio; st.rerun()
 
 st.title(f"💳 {USER_NAME} Wallet")
 tabs = st.tabs([T["tab_reg"], T["tab_aho"], T["tab_res"], T["tab_ia"]])
@@ -173,7 +194,6 @@ with tabs[0]:
             nuevo = pd.DataFrame([[str(f_fec), m_tipo, f_cta, f_cat, f_des, int(clean_mto)]], columns=df_mov.columns)
             pd.concat([df_mov, nuevo], ignore_index=True).to_csv(FILE_DB, index=False)
             
-            # Link para Google Calendar si es un gasto con vencimiento
             if m_tipo == "GASTO" and sub_t == "Vencimiento":
                 p = urllib.parse.urlencode({"action":"TEMPLATE","text":f"PAGAR {f_des}","dates":f"{str(f_fec).replace('-','')}/{str(f_fec).replace('-','')}"})
                 st.session_state.cal_link = f"https://www.google.com/calendar/render?{p}"
