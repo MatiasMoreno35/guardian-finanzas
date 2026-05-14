@@ -8,7 +8,8 @@ from groq import Groq
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Smart Wallet", page_icon="💰", layout="wide")
 
-# --- LÓGICA DE MULTIUSUARIO (NUEVO) ---
+# --- LÓGICA DE MULTIUSUARIO ---
+# Captura el ID de la URL. Si no hay, usa "comun"
 user_id = st.query_params.get("user", "comun")
 FILE_DB = f"movimientos_{user_id}.csv"
 FILE_CONFIG = f"config_{user_id}.csv"
@@ -19,7 +20,7 @@ TEXTS = {
         "config_title": "🚀 Configuración Inicial",
         "name_label": "¿Cómo te llamas?",
         "meta_label": "Meta de ahorro mensual",
-        "ctas_label": "Tus cuentas (ej: Billetera, Mach, Destacame)",
+        "ctas_label": "Tus cuentas (ej: Billetera, Banco, Ahorro)",
         "venc_label": "Gastos con VENCIMIENTO",
         "diario_label": "Gastos DIARIOS",
         "save_config": "Guardar Configuración",
@@ -80,17 +81,18 @@ if os.path.exists(FILE_CONFIG):
     CAT_VENC = [c.strip() for c in config["cat_vencimiento"].split(",")]
     CAT_DIARIO = [c.strip() for c in config["cat_diarias"].split(",")]
 else:
-    st.title(f"🚀 Setup: Usuario {user_id}")
+    st.title(f"🚀 Setup")
     lang_setup = st.selectbox("Idioma", ["Español", "Português"])
     L = "es" if lang_setup == "Español" else "pt"
     T = TEXTS[L]
     
     with st.form("config_form"):
-        nombre = st.text_input(T["name_label"], placeholder="Ej: Pablo Moreno")
+        # USANDO NOMBRE GENÉRICO "JUAN PÉREZ" COMO EJEMPLO
+        nombre = st.text_input(T["name_label"], placeholder="Ej: Juan Pérez")
         meta = st.number_input(T["meta_label"], value=0.0)
-        nombres_ctas = st.text_input(T["ctas_label"], placeholder="Billetera, Banco, Ahorro")
-        cat_v = st.text_input(T["venc_label"], placeholder="Luz, Agua")
-        cat_d = st.text_input(T["diario_label"], placeholder="Pan, Almuerzo")
+        nombres_ctas = st.text_input(T["ctas_label"], placeholder="Efectivo, Banco, App")
+        cat_v = st.text_input(T["venc_label"], placeholder="Arriendo, Internet")
+        cat_d = st.text_input(T["diario_label"], placeholder="Comida, Pasajes")
         if st.form_submit_button(T["save_config"]):
             pd.DataFrame([{"nombre": nombre, "meta": float(meta), "cuentas": nombres_ctas, 
                            "cat_vencimiento": cat_v, "cat_diarias": cat_d, "idioma": L}]).to_csv(FILE_CONFIG, index=False)
@@ -164,11 +166,10 @@ with tabs[0]:
             if m_tipo == "GASTO" and sub_t == "Vencimiento":
                 p = urllib.parse.urlencode({"action":"TEMPLATE","text":f"PAGAR {f_des}","dates":f"{str(f_fec).replace('-','')}/{str(f_fec).replace('-','')}"})
                 st.session_state.cal_link = f"https://www.google.com/calendar/render?{p}"
-                st.success("✅ Guardado")
             else:
                 st.session_state.cal_link = None
-                st.success("✅ Guardado")
             
+            st.success("✅ Guardado")
             st.session_state.form_tick = st.session_state.get('form_tick', 0) + 1
             st.rerun()
     
@@ -183,15 +184,17 @@ with tabs[1]:
         acc_ori = st.selectbox("De:", CUENTAS_LISTA, key="ao")
         mto_dep = st.number_input("Valor:", min_value=0.0, step=1000.0, key="md")
         if st.button("💰 DEPOSITAR"):
-            mov = pd.DataFrame([[str(datetime.now().date()), "DEPOSITO AHORRO", acc_ori, "AHORRO", "TRASPASO", int(mto_dep)]], columns=df_mov.columns)
-            pd.concat([df_mov, mov], ignore_index=True).to_csv(FILE_DB, index=False); st.rerun()
+            if mto_dep > 0:
+                mov = pd.DataFrame([[str(datetime.now().date()), "DEPOSITO AHORRO", acc_ori, "AHORRO", "TRASPASO", int(mto_dep)]], columns=df_mov.columns)
+                pd.concat([df_mov, mov], ignore_index=True).to_csv(FILE_DB, index=False); st.rerun()
     with col_a2:
         st.write("⬇️ **Retirar**")
         acc_des = st.selectbox("Para:", CUENTAS_LISTA, key="ad")
         mto_ret = st.number_input("Valor:", min_value=0.0, step=1000.0, key="mr")
         if st.button("💸 RETIRAR"):
-            mov = pd.DataFrame([[str(datetime.now().date()), "RETIRO AHORRO", acc_des, "AHORRO", "RETIRO", int(mto_ret)]], columns=df_mov.columns)
-            pd.concat([df_mov, mov], ignore_index=True).to_csv(FILE_DB, index=False); st.rerun()
+            if mto_ret > 0:
+                mov = pd.DataFrame([[str(datetime.now().date()), "RETIRO AHORRO", acc_des, "AHORRO", "RETIRO", int(mto_ret)]], columns=df_mov.columns)
+                pd.concat([df_mov, mov], ignore_index=True).to_csv(FILE_DB, index=False); st.rerun()
 
 # --- RESUMEN ---
 with tabs[2]:
@@ -206,7 +209,7 @@ with tabs[2]:
     c_cap, c_aho = st.columns(2)
     c_cap.metric(T["cap_total"], f"${total_capital:,.0f}")
     diff = saldos['Ahorro'] - st.session_state.meta_dinamica
-    c_aho.metric(T["aho_saldo"], f"${saldos['Ahorro']:,.0f}", delta=f"{diff:,.0f} vs Meta")
+    c_aho.metric(T["aho_saldo"], f"${saldos['Ahorro']:,.0f}", delta=f"{diff:,.0f}")
     st.dataframe(df_mov.sort_values(by="FECHA", ascending=False), use_container_width=True)
 
 # --- IA ---
@@ -214,11 +217,11 @@ with tabs[3]:
     api_key = st.secrets.get("GROQ_API_KEY")
     if api_key:
         client = Groq(api_key=api_key)
-        user_ask = st.text_input(f"{USER_NAME}:")
+        user_ask = st.text_input(f"Consulta:")
         if user_ask:
             ctx = f"Capital: {total_capital}, Ahorro: {saldos['Ahorro']}, Meta: {st.session_state.meta_dinamica}"
             chat = client.chat.completions.create(
-                messages=[{"role": "system", "content": f"Asesor de {USER_NAME}. Responde en {L}."},
+                messages=[{"role": "system", "content": f"Asesor financiero. Responde en {L}."},
                           {"role": "user", "content": f"Ctx: {ctx}. Pregunta: {user_ask}"}],
                 model="llama-3.1-8b-instant")
             st.info(chat.choices[0].message.content)
