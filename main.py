@@ -8,6 +8,11 @@ from groq import Groq
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Smart Wallet", page_icon="💰", layout="wide")
 
+# --- LÓGICA DE MULTIUSUARIO (NUEVO) ---
+user_id = st.query_params.get("user", "comun")
+FILE_DB = f"movimientos_{user_id}.csv"
+FILE_CONFIG = f"config_{user_id}.csv"
+
 # --- TRADUCCIONES ---
 TEXTS = {
     "es": {
@@ -15,8 +20,8 @@ TEXTS = {
         "name_label": "¿Cómo te llamas?",
         "meta_label": "Meta de ahorro mensual",
         "ctas_label": "Tus cuentas (ej: Billetera, Mach, Destacame)",
-        "venc_label": "Gastos con VENCIMIENTO (ej: Colegio, Cuentas)",
-        "diario_label": "Gastos DIARIOS (ej: Transporte, Comida)",
+        "venc_label": "Gastos con VENCIMIENTO",
+        "diario_label": "Gastos DIARIOS",
         "save_config": "Guardar Configuración",
         "meta_actual": "🎯 Meta de Ahorro Actual:",
         "reset_btn": "🚨 Reiniciar Sistema",
@@ -39,9 +44,9 @@ TEXTS = {
         "config_title": "🚀 Configuração Inicial",
         "name_label": "Como você se chama?",
         "meta_label": "Meta de economia mensal",
-        "ctas_label": "Suas contas (ex: Carteira, Nubank)",
-        "venc_label": "Gastos com VENCIMENTO (ex: Escola, Contas)",
-        "diario_label": "Gastos DIÁRIOS (ex: Transporte, Comida)",
+        "ctas_label": "Suas contas",
+        "venc_label": "Gastos com VENCIMENTO",
+        "diario_label": "Gastos DIÁRIOS",
         "save_config": "Salvar Configuração",
         "meta_actual": "🎯 Meta de Economia Atual:",
         "reset_btn": "🚨 Reiniciar Sistema",
@@ -62,10 +67,6 @@ TEXTS = {
     }
 }
 
-# --- ARCHIVOS ---
-FILE_DB = "movimientos_db.csv"
-FILE_CONFIG = "config_usuario.csv"
-
 # --- CARGAR CONFIGURACIÓN ---
 if os.path.exists(FILE_CONFIG):
     config = pd.read_csv(FILE_CONFIG).iloc[0].to_dict()
@@ -79,7 +80,7 @@ if os.path.exists(FILE_CONFIG):
     CAT_VENC = [c.strip() for c in config["cat_vencimiento"].split(",")]
     CAT_DIARIO = [c.strip() for c in config["cat_diarias"].split(",")]
 else:
-    st.title("🚀 Smart Wallet Setup")
+    st.title(f"🚀 Setup: Usuario {user_id}")
     lang_setup = st.selectbox("Idioma", ["Español", "Português"])
     L = "es" if lang_setup == "Español" else "pt"
     T = TEXTS[L]
@@ -87,9 +88,9 @@ else:
     with st.form("config_form"):
         nombre = st.text_input(T["name_label"], placeholder="Ej: Pablo Moreno")
         meta = st.number_input(T["meta_label"], value=0.0)
-        nombres_ctas = st.text_input(T["ctas_label"], placeholder="Billetera, Banco Estado, Ahorro")
-        cat_v = st.text_input(T["venc_label"], placeholder="Luz, Agua, Internet")
-        cat_d = st.text_input(T["diario_label"], placeholder="Pan, Micro, Almuerzo")
+        nombres_ctas = st.text_input(T["ctas_label"], placeholder="Billetera, Banco, Ahorro")
+        cat_v = st.text_input(T["venc_label"], placeholder="Luz, Agua")
+        cat_d = st.text_input(T["diario_label"], placeholder="Pan, Almuerzo")
         if st.form_submit_button(T["save_config"]):
             pd.DataFrame([{"nombre": nombre, "meta": float(meta), "cuentas": nombres_ctas, 
                            "cat_vencimiento": cat_v, "cat_diarias": cat_d, "idioma": L}]).to_csv(FILE_CONFIG, index=False)
@@ -144,7 +145,7 @@ with tabs[0]:
         sub_t = c1.selectbox("Frecuencia", ["Vencimiento", "Diario"])
         f_cat = c1.selectbox(T["cat_label"], CAT_VENC if sub_t == "Vencimiento" else CAT_DIARIO)
         f_fec = c2.date_input("Fecha") if sub_t == "Vencimiento" else datetime.now().date()
-        f_cta = CUENTAS_LISTA[0] # Capital único, se descuenta de la primera cuenta por defecto
+        f_cta = CUENTAS_LISTA[0] 
     else:
         f_cta = c1.selectbox("Destino", CUENTAS_LISTA)
         f_fec = datetime.now().date()
@@ -163,10 +164,10 @@ with tabs[0]:
             if m_tipo == "GASTO" and sub_t == "Vencimiento":
                 p = urllib.parse.urlencode({"action":"TEMPLATE","text":f"PAGAR {f_des}","dates":f"{str(f_fec).replace('-','')}/{str(f_fec).replace('-','')}"})
                 st.session_state.cal_link = f"https://www.google.com/calendar/render?{p}"
-                st.success("✅ Registro guardado")
+                st.success("✅ Guardado")
             else:
                 st.session_state.cal_link = None
-                st.success("✅ Registro guardado")
+                st.success("✅ Guardado")
             
             st.session_state.form_tick = st.session_state.get('form_tick', 0) + 1
             st.rerun()
@@ -181,18 +182,16 @@ with tabs[1]:
         st.write("⬆️ **Ahorrar**")
         acc_ori = st.selectbox("De:", CUENTAS_LISTA, key="ao")
         mto_dep = st.number_input("Valor:", min_value=0.0, step=1000.0, key="md")
-        if st.button("💰 OK DEPOSITAR"):
+        if st.button("💰 DEPOSITAR"):
             mov = pd.DataFrame([[str(datetime.now().date()), "DEPOSITO AHORRO", acc_ori, "AHORRO", "TRASPASO", int(mto_dep)]], columns=df_mov.columns)
-            pd.concat([df_mov, mov], ignore_index=True).to_csv(FILE_DB, index=False)
-            st.rerun()
+            pd.concat([df_mov, mov], ignore_index=True).to_csv(FILE_DB, index=False); st.rerun()
     with col_a2:
         st.write("⬇️ **Retirar**")
         acc_des = st.selectbox("Para:", CUENTAS_LISTA, key="ad")
         mto_ret = st.number_input("Valor:", min_value=0.0, step=1000.0, key="mr")
-        if st.button("💸 OK RETIRAR"):
+        if st.button("💸 RETIRAR"):
             mov = pd.DataFrame([[str(datetime.now().date()), "RETIRO AHORRO", acc_des, "AHORRO", "RETIRO", int(mto_ret)]], columns=df_mov.columns)
-            pd.concat([df_mov, mov], ignore_index=True).to_csv(FILE_DB, index=False)
-            st.rerun()
+            pd.concat([df_mov, mov], ignore_index=True).to_csv(FILE_DB, index=False); st.rerun()
 
 # --- RESUMEN ---
 with tabs[2]:
