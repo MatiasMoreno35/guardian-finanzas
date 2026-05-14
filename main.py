@@ -30,8 +30,7 @@ df_mov = pd.read_csv(FILE_DB)
 # --- SIDEBAR: META MENSUAL ---
 with st.sidebar:
     st.title("⚙️ Configuración")
-    # Formato visual $100.000 para la meta
-    meta_mensual = st.number_input("Meta de Ahorro Mensual", min_value=0, value=100000, step=10000, format="%d")
+    meta_mensual = st.number_input("Meta de Ahorro Mensual", min_value=0, value=100000, step=10000)
     st.write(f"Meta actual: **${meta_mensual:,.0f}**")
     st.divider()
     if st.button("🗑️ REINICIAR BASE DE DATOS"):
@@ -50,8 +49,6 @@ for _, row in df_mov.iterrows():
         if row['TIPO'] == 'INGRESO':
             saldos[cta] += m
         else:
-            # Los gastos ahora restan del capital general. 
-            # Para mantener integridad, se descuentan de la primera cuenta disponible o proporcionalmente
             saldos[cta] -= m
     except: continue
 
@@ -70,40 +67,51 @@ with tabs[0]:
     
     with st.form("f_reg", clear_on_submit=True):
         if t_op == "GASTO":
-            # Eliminada la selección de cuenta para gastos
             c1, c2 = st.columns(2)
             f_cat = c1.selectbox("Categoría", ["COLEGIO 🏫", "CUOTAS 💳", "CUENTAS 💡", "TRANSPORTE 🚗", "COMIDA 🍕", "VARIOS 🧩"])
             
-            # Fecha condicional: Vencimiento para fijos, Hoy para el resto
+            # Lógica de Fecha: Solo aparece si es categoría fija
             if f_cat in ["COLEGIO 🏫", "CUOTAS 💳", "CUENTAS 💡"]:
                 f_fec = c2.date_input("Fecha de Vencimiento", datetime.now())
             else:
                 f_fec = datetime.now().date()
-                c2.info("Fecha: Hoy")
+                c2.info("📅 Gasto para hoy")
             
-            f_mto = st.number_input("Valor $", min_value=0, step=1000, format="%d")
+            # Entrada de monto con previsualización formateada
+            raw_mto = st.text_input("Valor $ (Solo números)", value="0")
+            # Limpiamos puntos/comas por si el usuario los pone, y convertimos a int
+            try:
+                f_mto = int(raw_mto.replace(".", "").replace(",", ""))
+            except:
+                f_mto = 0
+            st.write(f"Confirmado: **${f_mto:,.0f}**")
+            
             f_des = st.text_input("Descripción").upper()
-            # Internamente se asigna a 'Billetera física' como cuenta por defecto para el descuento de capital
             f_cta_interna = "Billetera física" 
             
         else:
-            # Para ingresos se mantiene la cuenta de destino
             c1, c2 = st.columns(2)
             f_cta_interna = c1.selectbox("Destino del dinero", ["Billetera física", "Cuenta Mach", "Cuenta destacame", "Ahorro"])
-            f_mto = c1.number_input("Monto $", min_value=0, step=1000, format="%d")
+            
+            raw_mto = c1.text_input("Monto $", value="0")
+            try:
+                f_mto = int(raw_mto.replace(".", "").replace(",", ""))
+            except:
+                f_mto = 0
+            c1.write(f"Confirmado: **${f_mto:,.0f}**")
+            
             f_fec = c2.date_input("Fecha de Ingreso", datetime.now())
             f_cat = "INGRESO 💰"
-            f_des = st.text_input("Descripción (Ej: Sueldo)").upper()
+            f_des = st.text_input("Descripción").upper()
 
         if st.form_submit_button("💾 GUARDAR"):
             nuevo = pd.DataFrame([[str(f_fec), t_op, f_cta_interna, f_cat, f_des, f_mto]], columns=df_mov.columns)
             pd.concat([df_mov, nuevo], ignore_index=True).to_csv(FILE_DB, index=False)
             
-            # Google Calendar para fijos
             if t_op == "GASTO" and f_cat in ["COLEGIO 🏫", "CUOTAS 💳", "CUENTAS 💡"]:
                 f_l = str(f_fec).replace("-", "")
                 p = urllib.parse.urlencode({"action":"TEMPLATE","text":f"PAGAR {f_des}","details":f"Monto: ${f_mto:,.0f}","dates":f"{f_l}/{f_l}"})
-                st.info(f"📅 [Agendar Recordatorio](https://www.google.com/calendar/render?{p})")
+                st.info(f"📅 [Agendar en Calendar](https://www.google.com/calendar/render?{p})")
             
             st.success("Registrado.")
             st.rerun()
