@@ -8,20 +8,19 @@ import google.generativeai as genai
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Guardian Pro", page_icon="🛡️", layout="wide")
 
-# --- CONEXIÓN IA (LLAVE NUEVA) ---
-# Usando la llave de AISelect_20260513_220308_Chrome.jpg
+# --- CONEXIÓN IA (LLAVE: AIzaSyCpU64iUKy5m91g8phWk6GpjdmtSNfVEgU) ---
 api_key = st.secrets.get("GEMINI_API_KEY")
 model_ai = None
 
 if api_key:
     try:
         genai.configure(api_key=api_key)
-        # Forzamos la versión 1.5-flash que es la más estable para apps móviles
+        # Intentamos con el nombre estándar. Si falla el 404, Streamlit necesita el Reboot.
         model_ai = genai.GenerativeModel('gemini-1.5-flash')
     except Exception as e:
-        st.error(f"Error técnico en la conexión: {e}")
+        st.error(f"Error de inicialización: {e}")
 else:
-    st.warning("⚠️ Configura la GEMINI_API_KEY en los Secrets de Streamlit.")
+    st.warning("⚠️ Configura la GEMINI_API_KEY en los Secrets.")
 
 # --- BASE DE DATOS ---
 FILE_DB = "movimientos_db.csv"
@@ -82,28 +81,28 @@ with tabs[1]:
 with tabs[2]:
     st.subheader("🕵️ Chat con tu Analista")
     if model_ai:
-        user_ask = st.text_input("¿Qué quieres saber sobre tus finanzas?")
+        user_ask = st.text_input("¿Qué quieres saber, Francisco?")
         if user_ask:
-            ctx = f"Saldos: Mach ${saldos['MACH']}, Billetera ${saldos['BILLETERA']}, Destacame ${saldos['DESTACAME']}. Patrimonio: ${total_patrimonio}. Meta ahorro: $100.000."
-            with st.spinner("El Analista está pensando..."):
+            ctx = f"Saldos: Mach ${saldos['MACH']}, Billetera ${saldos['BILLETERA']}, Destacame ${saldos['DESTACAME']}. Total: ${total_patrimonio}."
+            with st.spinner("Analizando..."):
                 try:
-                    # Instrucción directa para evitar fallos de ruta
-                    response = model_ai.generate_content(f"Usuario: Francisco. Datos: {ctx}. Pregunta: {user_ask}. Responde corto y fiero.")
+                    # Prompt optimizado
+                    response = model_ai.generate_content(f"Eres asesor financiero. Datos: {ctx}. Pregunta: {user_ask}")
                     st.info(f"🤖 **Analista:** {response.text}")
                 except Exception as e:
-                    st.error(f"Error de conexión con Google: {e}")
-                    st.info("Asegúrate de haber hecho el Reboot de la App en Streamlit Cloud.")
+                    st.error(f"Error detectado: {e}")
+                    st.warning("⚠️ Streamlit sigue usando una versión vieja de la librería. Por favor, haz 'Reboot' en el panel de Streamlit Cloud.")
     else:
-        st.error("IA desactivada por falta de API Key.")
+        st.error("IA desactivada.")
 
 with tabs[3]:
     st.subheader("Simulador")
-    m_s = st.number_input("Gasto a probar $", min_value=0)
+    m_s = st.number_input("Gasto proyectado $", min_value=0)
     if st.button("¿Es viable?"):
         if (total_patrimonio - m_s) < 100000:
             st.error(f"❌ RECHAZADO. Debes proteger tus $100.000 de ahorro.")
         else:
-            st.success(f"✅ PERMITIDO. No afecta tu meta principal.")
+            st.success(f"✅ PERMITIDO.")
 
 if st.sidebar.button("🗑️ REINICIAR TODO"):
     if os.path.exists(FILE_DB): os.remove(FILE_DB)
