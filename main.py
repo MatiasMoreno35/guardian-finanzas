@@ -8,29 +8,29 @@ import google.generativeai as genai
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Guardian Pro", page_icon="🛡️", layout="wide")
 
-# --- CONEXIÓN IA REFORZADA ---
-# Usa la nueva llave que creaste en un "New Project" de Google AI Studio
+# --- CONEXIÓN IA ---
+# Usa la llave de AISelect_20260513_220308_Chrome.jpg en tus Secrets
 api_key = st.secrets.get("GEMINI_API_KEY")
 model_ai = None
 
 if api_key:
     try:
         genai.configure(api_key=api_key)
-        # Usamos 'gemini-1.5-flash' sin prefijos de versión para evitar el error 404
+        # Nombre del modelo actualizado para evitar errores 404
         model_ai = genai.GenerativeModel('gemini-1.5-flash')
     except Exception as e:
-        st.error(f"Error de Configuración: {e}")
+        st.error(f"Error de Configuración IA: {e}")
 else:
-    st.warning("⚠️ No se encontró la API KEY en los Secrets de Streamlit.")
+    st.warning("⚠️ No se encontró la GEMINI_API_KEY en los Secrets.")
 
-# --- BASE DE DATOS LOCAL ---
+# --- GESTIÓN DE BASE DE DATOS ---
 FILE_DB = "movimientos_db.csv"
 if not os.path.exists(FILE_DB):
     pd.DataFrame(columns=['FECHA', 'TIPO', 'CUENTA', 'CATEGORIA', 'DESC', 'MONTO']).to_csv(FILE_DB, index=False)
 
 df_mov = pd.read_csv(FILE_DB)
 
-# --- LÓGICA DE SALDOS (Billetera, Mach, Destácame) ---
+# --- LÓGICA DE SALDOS ---
 saldos = {"BILLETERA": 0.0, "MACH": 0.0, "DESTACAME": 0.0}
 for _, row in df_mov.iterrows():
     try:
@@ -43,10 +43,10 @@ for _, row in df_mov.iterrows():
 
 total_patrimonio = sum(saldos.values())
 
-# --- INTERFAZ PRINCIPAL ---
+# --- DISEÑO DE INTERFAZ ---
 st.title("🛡️ Guardian Financiero Pro")
 
-tabs = st.tabs(["📝 REGISTRO", "📊 RESUMEN DETALLADO", "🕵️ ANALISTA IA", "🔮 SIMULADOR"])
+tabs = st.tabs(["📝 REGISTRO", "📊 RESUMEN", "🕵️ ANALISTA IA", "🔮 SIMULADOR"])
 
 # --- PESTAÑA 1: REGISTRO ---
 with tabs[0]:
@@ -56,8 +56,8 @@ with tabs[0]:
     with st.form("f_reg", clear_on_submit=True):
         c1, c2 = st.columns(2)
         with c1:
-            f_cta = st.selectbox("Cuenta de destino/origen", ["BILLETERA", "MACH", "DESTACAME"])
-            f_mto = st.number_input("Monto $", min_value=0)
+            f_cta = st.selectbox("Cuenta", ["BILLETERA", "MACH", "DESTACAME"])
+            f_mto = st.number_input("Monto $", min_value=0, step=1000)
         with c2:
             f_fec = st.date_input("Fecha", datetime.now())
             if t_op == "GASTO":
@@ -65,13 +65,14 @@ with tabs[0]:
             else:
                 f_cat = "INGRESO 💰"
         
-        f_des = st.text_input("Descripción (Ej: Pago Luz, Bono, etc.)").upper()
+        # Se convierte a mayúsculas automáticamente
+        f_des = st.text_input("Descripción").upper()
         
         if st.form_submit_button("💾 GUARDAR"):
             nuevo = pd.DataFrame([[str(f_fec), t_op, f_cta, f_cat, f_des, f_mto]], columns=df_mov.columns)
             pd.concat([df_mov, nuevo], ignore_index=True).to_csv(FILE_DB, index=False)
             
-            # Alerta de Calendario para gastos críticos
+            # Link opcional para Google Calendar en gastos fijos
             if t_op == "GASTO" and f_cat in ["COLEGIO 🏫", "CUOTAS 💳", "CUENTAS 💡"]:
                 f_limpia = str(f_fec).replace("-", "")
                 params = urllib.parse.urlencode({
@@ -80,14 +81,14 @@ with tabs[0]:
                     "details": f"Monto: ${f_mto:,.0f}", 
                     "dates": f"{f_limpia}/{f_limpia}"
                 })
-                st.markdown(f"### 📅 [AGENDAR EN GOOGLE CALENDAR](https://www.google.com/calendar/render?{params})")
+                st.info(f"📅 [Agendar recordatorio de pago](https://www.google.com/calendar/render?{params})")
             
-            st.success("Movimiento registrado con éxito.")
+            st.success("Movimiento guardado.")
             st.rerun()
 
-# --- PESTAÑA 2: RESUMEN DETALLADO ---
+# --- PESTAÑA 2: RESUMEN ---
 with tabs[1]:
-    st.subheader("Estado Actual")
+    st.subheader("Saldos Actuales")
     cols = st.columns(3)
     cols[0].metric("Billetera", f"${saldos['BILLETERA']:,.0f}")
     cols[1].metric("Cuenta Mach", f"${saldos['MACH']:,.0f}")
@@ -102,40 +103,44 @@ with tabs[1]:
             res_cat = g_df.groupby('CATEGORIA')['MONTO'].sum().reset_index()
             st.table(res_cat.style.format({"MONTO": "${:,.0f}"}))
         
-        st.subheader("Historial de Movimientos")
+        st.subheader("Historial Completo")
         st.dataframe(df_mov.sort_values(by="FECHA", ascending=False), use_container_width=True)
     else:
-        st.info("No hay datos registrados todavía.")
+        st.info("Sin datos registrados.")
 
 # --- PESTAÑA 3: ANALISTA IA ---
 with tabs[2]:
     st.subheader("🕵️ Chat con tu Analista")
     if model_ai:
-        user_ask = st.text_input("Hazle una pregunta a tu IA sobre tus finanzas:")
+        user_ask = st.text_input("Haz una pregunta sobre tus movimientos o ahorros:")
         if user_ask:
-            # Contexto simplificado para evitar errores de red
+            # Contexto de datos para la IA
             ctx = f"Saldos: Mach ${saldos['MACH']}, Billetera ${saldos['BILLETERA']}, Destacame ${saldos['DESTACAME']}. Patrimonio total: ${total_patrimonio}."
-            with st.spinner("Consultando al analista..."):
+            with st.spinner("Analizando..."):
                 try:
-                    response = model_ai.generate_content(f"Eres un analista financiero experto. Usuario: Francisco. Datos: {ctx}. Pregunta: {user_ask}")
+                    response = model_ai.generate_content(f"Actúa como analista financiero. Contexto: {ctx}. Pregunta: {user_ask}")
                     st.info(f"🤖 **Analista:** {response.text}")
                 except Exception as e:
-                    st.error(f"Error de respuesta de la IA: {e}")
+                    st.error(f"Error de IA: {e}")
+                    st.info("Nota: Revisa si el archivo requirements.txt tiene google-generativeai>=0.5.0")
     else:
-        st.error("❌ IA no configurada correctamente.")
+        st.error("IA desactivada. Revisa tu API Key.")
 
 # --- PESTAÑA 4: SIMULADOR ---
 with tabs[3]:
-    st.subheader("Simulador de Meta de Ahorro")
-    m_sim = st.number_input("Monto del gasto que quieres simular $", min_value=0)
-    if st.button("¿Puedo realizar este gasto?"):
-        if (total_patrimonio - m_sim) < 100000:
-            st.error(f"❌ RECHAZADO. Tu saldo bajaría a ${total_patrimonio - m_sim:,.0f}, rompiendo tu meta de ahorro de $100.000.")
+    st.subheader("Simulador de Compra")
+    m_sim = st.number_input("¿Cuánto planeas gastar? $", min_value=0)
+    if st.button("Verificar Viabilidad"):
+        restante = total_patrimonio - m_sim
+        if restante < 100000:
+            st.error(f"❌ RECHAZADO. Tu patrimonio bajaría a ${restante:,.0f}. Debes mantener al menos $100.000 ahorrados.")
         else:
-            st.success(f"✅ PERMITIDO. Mantendrías tu meta de ahorro protegida.")
+            st.success(f"✅ PERMITIDO. Mantienes tu margen de ahorro de seguridad.")
 
-# --- BOTÓN DE REINICIO ---
-if st.sidebar.button("🗑️ BORRAR TODOS LOS DATOS"):
-    if os.path.exists(FILE_DB):
-        os.remove(FILE_DB)
-    st.rerun()
+# --- SIDEBAR: HERRAMIENTAS ---
+with st.sidebar:
+    st.write("---")
+    if st.button("🗑️ BORRAR BASE DE DATOS"):
+        if os.path.exists(FILE_DB):
+            os.remove(FILE_DB)
+            st.rerun()
