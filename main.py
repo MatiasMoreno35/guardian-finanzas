@@ -2,11 +2,12 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import os
+import urllib.parse
 
-# Configuración de la página
-st.set_page_config(page_title="Guardian Financiero", page_icon="🛡️", layout="wide")
+# --- CONFIGURACIÓN DE PÁGINA ---
+st.set_page_config(page_title="Guardian Financiero Pro", page_icon="🛡️", layout="wide")
 
-# --- ESTILO PERSONALIZADO (Solución Visual) ---
+# --- ESTILO VISUAL (DARK MODE PARA LECTURA CLARA) ---
 st.markdown("""
     <style>
     .main { background-color: #0e1117; color: white; }
@@ -15,72 +16,82 @@ st.markdown("""
         border: 1px solid #4a4a4a;
         padding: 15px;
         border-radius: 15px;
-        color: #00ff00 !important;
     }
     div[data-testid="stMetricValue"] { color: #ffffff !important; }
-    .stButton>button { border-radius: 20px; background-color: #2e7d32; color: white; }
+    div[data-testid="stMetricLabel"] { color: #00ff00 !important; }
+    .stButton>button { border-radius: 20px; width: 100%; height: 3em; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- SISTEMA DE ARCHIVOS Y REINICIO ---
+# --- BASE DE DATOS ---
 FILE_DB = "movimientos_db.csv"
 if not os.path.exists(FILE_DB):
     df_empty = pd.DataFrame(columns=['FECHA', 'TIPO', 'CUENTA', 'CATEGORIA', 'DESC', 'MONTO'])
     df_empty.to_csv(FILE_DB, index=False)
 
-# Cargar datos
 df_mov = pd.read_csv(FILE_DB)
 
-# --- CÁLCULO DE SALDOS REALES ---
-# Inicializamos saldos base (puedes ajustar estos números iniciales)
+# --- LÓGICA DE SALDOS ---
 saldos = {"BILLETERA": 0, "MACH": 0, "DESTACAME": 0}
-
-for index, row in df_mov.iterrows():
-    monto = row['MONTO']
-    cuenta = row['CUENTA']
+for _, row in df_mov.iterrows():
     if row['TIPO'] == 'INGRESO':
-        saldos[cuenta] += monto
-    elif row['TIPO'] in ['GASTO', 'AHORRO']:
-        saldos[cuenta] -= monto
+        saldos[row['CUENTA']] += row['MONTO']
+    else:
+        saldos[row['CUENTA']] -= row['MONTO']
 
 total_patrimonio = sum(saldos.values())
 
-# --- INTERFAZ PRINCIPAL ---
+# --- FUNCIONALIDAD DE CALENDARIO ---
+def generar_link_calendario(titulo, monto, fecha_vence):
+    f_limpia = str(fecha_vence).replace("-", "")
+    params = {
+        "action": "TEMPLATE",
+        "text": f"PAGAR {titulo.upper()}",
+        "details": f"Monto: ${monto:,.0f}",
+        "dates": f"{f_limpia}/{f_limpia}"
+    }
+    return f"https://www.google.com/calendar/render?{urllib.parse.urlencode(params)}"
+
+# --- INTERFAZ ---
 st.title("🛡️ Guardian Financiero Pro")
 
 tab1, tab2, tab3 = st.tabs(["📝 REGISTRO", "🕵️ ANALISTA IA", "🔮 SIMULADOR"])
 
 with tab1:
-    st.subheader("Registrar Movimiento")
-    col_t1, col_t2 = st.columns(2)
+    st.subheader("Nuevo Movimiento")
+    tipo_op = st.radio("Operación", ["GASTO", "INGRESO"], horizontal=True)
     
-    with col_t1:
-        tipo_op = st.radio("Tipo de Operación", ["GASTO", "INGRESO"], horizontal=True)
-    
-    with st.form("form_registro", clear_on_submit=True):
-        f_cuenta = st.selectbox("¿A qué cuenta?", ["BILLETERA", "MACH", "DESTACAME"])
+    with st.form("registro_form", clear_on_submit=True):
+        col_a, col_b = st.columns(2)
+        with col_a:
+            f_cuenta = st.selectbox("Cuenta", ["BILLETERA", "MACH", "DESTACAME"])
+            f_monto = st.number_input("Monto $", min_value=0)
+        with col_b:
+            f_fecha = st.date_input("Fecha (Gasto o Vencimiento)", datetime.now())
+            if tipo_op == "GASTO":
+                f_cat = st.selectbox("Categoría", ["COLEGIO 🏫", "CUOTAS 💳", "CUENTAS 💡", "TRANSPORTE 🚗", "COMIDA 🍕", "VARIOS 🧩"])
+            else:
+                f_cat = "INGRESO 💰"
         
-        # Lógica dinámica de categorías
-        if tipo_op == "GASTO":
-            f_cat = st.selectbox("Categoría de Gasto", ["COLEGIO 🏫", "CUOTAS 💳", "CUENTAS 💡", "TRANSPORTE 🚗", "COMIDA 🍕", "VARIOS 🧩"])
-        else:
-            f_cat = "SUELDO / ABONO 💰"
-            st.info("Registrando como Ingreso a la cuenta seleccionada.")
-
-        f_monto = st.number_input("Monto $", min_value=0)
-        f_desc = st.text_input("Nota (Ej: Supermercado, Pago Bono)").upper()
+        f_desc = st.text_input("Descripción").upper()
         
-        if st.form_submit_button("CONFIRMAR OPERACIÓN"):
-            nueva_fila = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d"), tipo_op, f_cuenta, f_cat, f_desc, f_monto]], 
-                                      columns=df_mov.columns)
-            df_mov = pd.concat([df_mov, nueva_fila], ignore_index=True)
-            df_mov.to_csv(FILE_DB, index=False)
-            st.success(f"¡Listo! Se ha actualizado el saldo de {f_cuenta}")
+        btn_save = st.form_submit_button("💾 GUARDAR MOVIMIENTO")
+        
+        if btn_save:
+            nueva_fila = pd.DataFrame([[f_fecha, tipo_op, f_cuenta, f_cat, f_desc, f_monto]], columns=df_mov.columns)
+            df_updated = pd.concat([df_mov, nueva_fila], ignore_index=True)
+            df_updated.to_csv(FILE_DB, index=False)
+            
+            st.success(f"Registrado en {f_cuenta}")
+            
+            # Alerta de Calendario (Solo para gastos críticos)
+            if tipo_op == "GASTO" and f_cat in ["COLEGIO 🏫", "CUOTAS 💳", "CUENTAS 💡"]:
+                link = generar_link_calendario(f_desc, f_monto, f_fecha)
+                st.markdown(f"### 📅 [HAGA CLIC AQUÍ PARA AGREGAR AL CALENDARIO]({link})")
             st.rerun()
 
 with tab2:
-    # Visualización de saldos
-    st.subheader("Estado de tus Cuentas")
+    st.subheader("Estado de Cuentas")
     c1, c2, c3 = st.columns(3)
     c1.metric("Billetera", f"${saldos['BILLETERA']:,.0f}")
     c2.metric("Cuenta Mach", f"${saldos['MACH']:,.0f}")
@@ -88,35 +99,29 @@ with tab2:
     
     st.divider()
     
-    # --- CHAT CON EL ANALISTA ---
-    st.subheader("💬 Habla con tu Analista Financiero")
-    prompt = st.text_input("Hazle una pregunta a la IA (Ej: ¿Cómo voy con mi meta de ahorro?)")
-    
-    if prompt:
-        meta_ahorro = 100000
-        # Lógica de respuesta inteligente básica (se puede expandir con GPT luego)
-        if "ahorro" in prompt.lower() or "meta" in prompt.lower():
-            if total_patrimonio < meta_ahorro:
-                st.write(f"🤖 **Analista:** Francisco, actualmente tienes ${total_patrimonio:,.0f}. Te faltan ${meta_ahorro - total_patrimonio:,.0f} para llegar a tu meta de 100k. ¡Evita gastos hormiga esta semana!")
+    st.subheader("💬 Chat con el Analista")
+    pregunta = st.text_input("Pregúntale a la IA sobre tus finanzas:")
+    if pregunta:
+        # Lógica descriptiva
+        if "ahorro" in pregunta.lower():
+            if total_patrimonio < 100000:
+                st.write(f"🤖 **Analista:** Francisco, estás a `${100000 - total_patrimonio:,.0f}` de tu meta. Revisa los gastos en COMIDA.")
             else:
-                st.write(f"🤖 **Analista:** ¡Excelente trabajo! Ya superaste la meta de ahorro por ${total_patrimonio - meta_ahorro:,.0f}. Sugiero mover el excedente a una cuenta que genere intereses.")
-        elif "gasto" in prompt.lower():
-            total_gastos = df_mov[df_mov['TIPO']=='GASTO']['MONTO'].sum()
-            st.write(f"🤖 **Analista:** Has gastado un total de ${total_gastos:,.0f} este mes. El 40% se concentra en la categoría {df_mov[df_mov['TIPO']=='GASTO']['CATEGORIA'].mode()[0] if not df_mov.empty else 'N/A'}.")
+                st.write(f"🤖 **Analista:** ¡Meta cumplida! Tienes `${total_patrimonio - 100000:,.0f}` de excedente.")
         else:
-            st.write("🤖 **Analista:** Estoy analizando tus movimientos de Billetera, Mach y Destácame. ¿Quieres que simulemos un gasto o revisemos el saldo de alguna cuenta específica?")
+            st.write("🤖 **Analista:** Estoy revisando tus movimientos en tiempo real. ¿Quieres ver un resumen de gastos?")
 
 with tab3:
-    st.subheader("Simulador de Compra")
-    m_sim = st.number_input("Precio del artículo", value=0)
-    if st.button("¿Es prudente comprarlo?"):
+    st.subheader("Simulador de Gastos Futuros")
+    m_sim = st.number_input("Monto proyectado $", min_value=0)
+    d_sim = st.text_input("¿Qué quieres comprar?").upper()
+    if st.button("Consultar Viabilidad"):
         if (total_patrimonio - m_sim) < 100000:
-            st.error(f"❌ No lo recomiendo. Tu saldo quedaría en ${total_patrimonio - m_sim:,.0f}, rompiendo tu meta de ahorro de $100.000.")
+            st.error(f"❌ RECHAZADO. Tu saldo bajaría a ${total_patrimonio - m_sim:,.0f}. No cumple la meta de ahorro.")
         else:
-            st.success(f"✅ Adelante. Aún después de la compra, mantienes tu meta de ahorro protegida.")
+            st.success(f"✅ APROBADO. Mantienes el ahorro de $100.000 protegido.")
 
-# Botón para borrar datos (como pediste)
-if st.sidebar.button("🗑️ REINICIAR TODA LA APP"):
-    df_empty = pd.DataFrame(columns=['FECHA', 'TIPO', 'CUENTA', 'CATEGORIA', 'DESC', 'MONTO'])
-    df_empty.to_csv(FILE_DB, index=False)
+# Sidebar de Reinicio
+if st.sidebar.button("🗑️ REINICIAR DATOS (BORRAR TODO)"):
+    pd.DataFrame(columns=['FECHA', 'TIPO', 'CUENTA', 'CATEGORIA', 'DESC', 'MONTO']).to_csv(FILE_DB, index=False)
     st.rerun()
