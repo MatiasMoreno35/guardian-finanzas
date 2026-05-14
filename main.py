@@ -9,6 +9,7 @@ from groq import Groq
 st.set_page_config(page_title="Guardian Pro", page_icon="🛡️", layout="wide")
 
 # --- CONEXIÓN IA (GROQ) ---
+# Llave: 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
 api_key = st.secrets.get("GROQ_API_KEY")
 client = None
 
@@ -57,13 +58,7 @@ with tabs[0]:
         if st.form_submit_button("💾 GUARDAR"):
             nuevo = pd.DataFrame([[str(f_fec), t_op, f_cta, f_cat, f_des, f_mto]], columns=df_mov.columns)
             pd.concat([df_mov, nuevo], ignore_index=True).to_csv(FILE_DB, index=False)
-            
-            if t_op == "GASTO" and f_cat in ["COLEGIO 🏫", "CUOTAS 💳", "CUENTAS 💡"]:
-                f_l = str(f_fec).replace("-", "")
-                p = urllib.parse.urlencode({"action":"TEMPLATE","text":f"PAGAR {f_des}","dates":f"{f_l}/{f_l}"})
-                st.info(f"📅 [Agendar en Calendar](https://www.google.com/calendar/render?{p})")
-            
-            st.success("Guardado.")
+            st.success("Movimiento guardado exitosamente.")
             st.rerun()
 
 with tabs[1]:
@@ -74,39 +69,40 @@ with tabs[1]:
     c[2].metric("Destácame", f"${saldos['DESTACAME']:,.0f}")
     st.divider()
     if not df_mov.empty:
-        st.subheader("Historial Reciente")
+        st.subheader("Historial de Movimientos")
         st.dataframe(df_mov.sort_values(by="FECHA", ascending=False), use_container_width=True)
 
 with tabs[2]:
-    st.subheader("🕵️ Analista IA (Llama 3)")
+    st.subheader("🕵️ Analista IA (Llama 3.1)")
     if client:
-        user_ask = st.text_input("¿En qué puedo ayudarte hoy, Pablo?")
+        user_ask = st.text_input("¿Qué quieres consultar hoy?")
         if user_ask:
             ctx = f"Saldos: Mach ${saldos['MACH']}, Billetera ${saldos['BILLETERA']}, Destacame ${saldos['DESTACAME']}. Total: ${total_patrimonio}."
-            with st.spinner("IA Pensando..."):
+            with st.spinner("IA Analizando..."):
                 try:
                     chat_completion = client.chat.completions.create(
                         messages=[
-                            {"role": "system", "content": "Eres un analista financiero experto. Ayuda a Pablo Moreno con sus finanzas."},
-                            {"role": "user", "content": f"Datos: {ctx}. Pregunta: {user_ask}"}
+                            {"role": "system", "content": "Eres un analista financiero experto. Ayuda al usuario con sus finanzas personales."},
+                            {"role": "user", "content": f"Datos actuales: {ctx}. Pregunta: {user_ask}"}
                         ],
-                        model="llama3-8b-8192", # Usamos Llama 3 que es gratis y veloz
+                        # MODELO ACTUALIZADO AQUÍ:
+                        model="llama-3.1-8b-instant", 
                     )
                     st.info(f"🤖 **Analista:** {chat_completion.choices[0].message.content}")
                 except Exception as e:
                     st.error(f"Error de IA: {e}")
     else:
-        st.error("IA no configurada.")
+        st.error("IA no configurada. Revisa los Secrets.")
 
 with tabs[3]:
-    st.subheader("Simulador")
-    m_s = st.number_input("Gasto proyectado $", min_value=0)
-    if st.button("¿Es viable?"):
+    st.subheader("Simulador de Gasto")
+    m_s = st.number_input("Monto del gasto $", min_value=0)
+    if st.button("Verificar Viabilidad"):
         if (total_patrimonio - m_s) < 100000:
-            st.error(f"❌ RECHAZADO. Debes proteger tus $100.000 de ahorro.")
+            st.error(f"❌ RECHAZADO. Tu patrimonio bajaría de los $100.000 de ahorro de seguridad.")
         else:
-            st.success(f"✅ PERMITIDO. No afecta tu meta.")
+            st.success(f"✅ PERMITIDO. No comprometes tu meta de ahorro.")
 
-if st.sidebar.button("🗑️ REINICIAR TODO"):
+if st.sidebar.button("🗑️ REINICIAR BASE DE DATOS"):
     if os.path.exists(FILE_DB): os.remove(FILE_DB)
     st.rerun()
