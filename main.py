@@ -3,27 +3,24 @@ import pandas as pd
 from datetime import datetime
 import os
 import urllib.parse
-import google.generativeai as genai
+from groq import Groq
 
-# --- CONFIGURACIÓN DE PÁGINA ---
+# --- CONFIGURACIÓN ---
 st.set_page_config(page_title="Guardian Pro", page_icon="🛡️", layout="wide")
 
-# --- CONEXIÓN IA REFORZADA ---
-# Llave proporcionada: AIzaSyCpU64iUKy5m91g8phWk6GpjdmtSNfVEgU
-api_key = st.secrets.get("GEMINI_API_KEY")
-model_ai = None
+# --- CONEXIÓN IA (GROQ) ---
+api_key = st.secrets.get("GROQ_API_KEY")
+client = None
 
 if api_key:
     try:
-        genai.configure(api_key=api_key)
-        # Forzamos el nombre técnico exacto para evitar el error 404 de versión beta
-        model_ai = genai.GenerativeModel(model_name='gemini-1.5-flash')
+        client = Groq(api_key=api_key)
     except Exception as e:
-        st.error(f"Error de inicialización: {e}")
+        st.error(f"Error al conectar con la IA: {e}")
 else:
-    st.warning("⚠️ Configura la GEMINI_API_KEY en los Secrets de Streamlit.")
+    st.warning("⚠️ No se encontró la GROQ_API_KEY en los Secrets.")
 
-# --- GESTIÓN DE DATOS ---
+# --- BASE DE DATOS ---
 FILE_DB = "movimientos_db.csv"
 if not os.path.exists(FILE_DB):
     pd.DataFrame(columns=['FECHA', 'TIPO', 'CUENTA', 'CATEGORIA', 'DESC', 'MONTO']).to_csv(FILE_DB, index=False)
@@ -60,50 +57,55 @@ with tabs[0]:
         if st.form_submit_button("💾 GUARDAR"):
             nuevo = pd.DataFrame([[str(f_fec), t_op, f_cta, f_cat, f_des, f_mto]], columns=df_mov.columns)
             pd.concat([df_mov, nuevo], ignore_index=True).to_csv(FILE_DB, index=False)
-            st.success("Guardado exitosamente.")
+            
+            if t_op == "GASTO" and f_cat in ["COLEGIO 🏫", "CUOTAS 💳", "CUENTAS 💡"]:
+                f_l = str(f_fec).replace("-", "")
+                p = urllib.parse.urlencode({"action":"TEMPLATE","text":f"PAGAR {f_des}","dates":f"{f_l}/{f_l}"})
+                st.info(f"📅 [Agendar en Calendar](https://www.google.com/calendar/render?{p})")
+            
+            st.success("Guardado.")
             st.rerun()
 
 with tabs[1]:
-    st.subheader("Saldos Actuales")
+    st.subheader("Estado de Cuentas")
     c = st.columns(3)
     c[0].metric("Billetera", f"${saldos['BILLETERA']:,.0f}")
-    c[1].metric("Cuenta Mach", f"${saldos['MACH']:,.0f}")
+    c[1].metric("Mach", f"${saldos['MACH']:,.0f}")
     c[2].metric("Destácame", f"${saldos['DESTACAME']:,.0f}")
-    
     st.divider()
     if not df_mov.empty:
-        st.subheader("Gastos por Categoría")
-        g_df = df_mov[df_mov['TIPO'] == 'GASTO']
-        if not g_df.empty:
-            st.table(g_df.groupby('CATEGORIA')['MONTO'].sum().reset_index().style.format({"MONTO": "${:,.0f}"}))
         st.subheader("Historial Reciente")
         st.dataframe(df_mov.sort_values(by="FECHA", ascending=False), use_container_width=True)
 
 with tabs[2]:
-    st.subheader("🕵️ Chat con tu Analista")
-    if model_ai:
-        user_ask = st.text_input("Hazle una pregunta a la IA:")
+    st.subheader("🕵️ Analista IA (Llama 3)")
+    if client:
+        user_ask = st.text_input("¿En qué puedo ayudarte hoy, Pablo?")
         if user_ask:
             ctx = f"Saldos: Mach ${saldos['MACH']}, Billetera ${saldos['BILLETERA']}, Destacame ${saldos['DESTACAME']}. Total: ${total_patrimonio}."
-            with st.spinner("Analizando información..."):
+            with st.spinner("IA Pensando..."):
                 try:
-                    # Llamada directa al modelo
-                    response = model_ai.generate_content(f"Eres asesor financiero de Francisco. Contexto: {ctx}. Pregunta: {user_ask}")
-                    st.info(f"🤖 **Analista:** {response.text}")
+                    chat_completion = client.chat.completions.create(
+                        messages=[
+                            {"role": "system", "content": "Eres un analista financiero experto. Ayuda a Pablo Moreno con sus finanzas."},
+                            {"role": "user", "content": f"Datos: {ctx}. Pregunta: {user_ask}"}
+                        ],
+                        model="llama3-8b-8192", # Usamos Llama 3 que es gratis y veloz
+                    )
+                    st.info(f"🤖 **Analista:** {chat_completion.choices[0].message.content}")
                 except Exception as e:
-                    st.error(f"Error detectado: {e}")
-                    st.warning("Si el error es 404, por favor haz 'Clear Cache' y luego 'Reboot' en Streamlit Cloud.")
+                    st.error(f"Error de IA: {e}")
     else:
-        st.error("IA desactivada por falta de API Key.")
+        st.error("IA no configurada.")
 
 with tabs[3]:
-    st.subheader("Simulador de Gasto")
-    m_s = st.number_input("Monto a simular $", min_value=0)
+    st.subheader("Simulador")
+    m_s = st.number_input("Gasto proyectado $", min_value=0)
     if st.button("¿Es viable?"):
         if (total_patrimonio - m_s) < 100000:
             st.error(f"❌ RECHAZADO. Debes proteger tus $100.000 de ahorro.")
         else:
-            st.success(f"✅ PERMITIDO. Tu meta de ahorro está a salvo.")
+            st.success(f"✅ PERMITIDO. No afecta tu meta.")
 
 if st.sidebar.button("🗑️ REINICIAR TODO"):
     if os.path.exists(FILE_DB): os.remove(FILE_DB)
