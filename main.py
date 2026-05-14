@@ -13,7 +13,8 @@ api_key_disponible = False
 if "GEMINI_API_KEY" in st.secrets:
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        model = genai.GenerativeModel('gemini-pro')
+        # Usamos flash para que sea más rápido y eficiente
+        model = genai.GenerativeModel('gemini-1.5-flash')
         api_key_disponible = True
     except Exception as e:
         st.error(f"Error al configurar Gemini: {e}")
@@ -39,11 +40,14 @@ df_mov = pd.read_csv(FILE_DB)
 # --- LÓGICA DE SALDOS ---
 saldos = {"BILLETERA": 0, "MACH": 0, "DESTACAME": 0}
 for _, row in df_mov.iterrows():
-    m = float(row['MONTO'])
-    if row['TIPO'] == 'INGRESO':
-        saldos[row['CUENTA']] += m
-    else:
-        saldos[row['CUENTA']] -= m
+    try:
+        m = float(row['MONTO'])
+        if row['TIPO'] == 'INGRESO':
+            saldos[row['CUENTA']] += m
+        else:
+            saldos[row['CUENTA']] -= m
+    except:
+        continue
 
 total_patrimonio = sum(saldos.values())
 
@@ -73,7 +77,7 @@ with tab1:
         if st.form_submit_button("💾 GUARDAR"):
             nueva_fila = pd.DataFrame([[f_fecha, tipo_op, f_cuenta, f_cat, f_desc, f_monto]], columns=df_mov.columns)
             pd.concat([df_mov, nueva_fila], ignore_index=True).to_csv(FILE_DB, index=False)
-            st.success("Registrado.")
+            st.success("Registrado con éxito.")
             if tipo_op == "GASTO" and f_cat in ["COLEGIO 🏫", "CUOTAS 💳", "CUENTAS 💡"]:
                 st.markdown(f"### 📅 [AGENDAR EN CALENDARIO]({generar_link_calendario(f_desc, f_monto, f_fecha)})")
             st.rerun()
@@ -87,55 +91,42 @@ with tab2:
     
     st.divider()
     if not df_mov.empty:
-        st.subheader("Historial Detallado")
-        st.dataframe(df_mov.sort_values(by="FECHA", ascending=False), use_container_width=True)
-        
         st.subheader("Gastos por Categoría")
         gastos_df = df_mov[df_mov['TIPO'] == 'GASTO']
         if not gastos_df.empty:
-            resumen_cat = gastos_df.groupby('CATEGORIA')['MONTO'].sum().sort_values(ascending=False).reset_index()
-            resumen_cat.columns = ['Categoría', 'Monto Total']
-            st.table(resumen_cat.style.format({"Monto Total": "${:,.0f}"}))
+            res_cat = gastos_df.groupby('CATEGORIA')['MONTO'].sum().reset_index()
+            st.table(res_cat.style.format({"MONTO": "${:,.0f}"}))
+        
+        st.subheader("Historial de Movimientos")
+        st.dataframe(df_mov.sort_values(by="FECHA", ascending=False), use_container_width=True)
     else:
-        st.info("No hay datos registrados aún.")
+        st.info("No hay datos registrados.")
 
 with tab3:
     st.subheader("💬 Consulta a la IA")
     if api_key_disponible:
-        pregunta = st.text_input("Hazle una pregunta a tu Analista sobre tus datos:")
+        pregunta = st.text_input("Pregúntale al Analista (Ej: ¿Cómo van mis gastos de este mes?)")
         if pregunta:
-            # Contexto resumido para la IA
-            resumen_gastos = ""
-            if not df_mov.empty:
-                resumen_gastos = df_mov[df_mov['TIPO']=='GASTO'].groupby('CATEGORIA')['MONTO'].sum().to_string()
-
-            contexto = f"""
-            Usuario: Francisco. 
-            Patrimonio total: ${total_patrimonio}. 
-            Saldos: Billetera ${saldos['BILLETERA']}, Mach ${saldos['MACH']}, Destacame ${saldos['DESTACAME']}. 
-            Meta de ahorro: $100.000. 
-            Resumen de gastos por categoría: {resumen_gastos}.
-            """
-            with st.spinner("Analizando..."):
+            # Resumen simplificado para no saturar la IA
+            contexto = f"Francisco tiene ${total_patrimonio}. En Mach: ${saldos['MACH']}. En Billetera: ${saldos['BILLETERA']}. En Destacame: ${saldos['DESTACAME']}. Meta ahorro: $100.000. Movimientos recientes: {df_mov.tail(5).to_string()}"
+            with st.spinner("Analizando tus finanzas..."):
                 try:
-                    response = model.generate_content(f"Eres un analista financiero fiero pero servicial. Contexto: {contexto}. Pregunta: {pregunta}")
+                    response = model.generate_content(f"Eres un analista financiero experto. Contexto: {contexto}. Pregunta: {pregunta}")
                     st.markdown(f"🤖 **Analista:** {response.text}")
                 except Exception as e:
-                    st.error(f"Error en la IA: {e}")
+                    st.error("La IA tuvo un problema al procesar. Intenta con una pregunta más corta.")
     else:
-        st.warning("⚠️ La IA está desactivada. Por favor, ingresa tu API KEY en los Secrets de Streamlit con el formato: GEMINI_API_KEY = 'TU_LLAVE'")
+        st.warning("Configura tu API KEY en los Secrets de Streamlit.")
 
 with tab4:
-    st.subheader("Simulador")
-    m_sim = st.number_input("Monto del gasto proyectado $", min_value=0)
-    if st.button("¿Es viable realizar este gasto?"):
-        disponible = total_patrimonio - m_sim
-        if disponible < 100000:
-            st.error(f"❌ RECHAZADO. Tu saldo bajaría a ${disponible:,.0f}, lo cual rompe tu meta de ahorro de $100.000.")
+    st.subheader("Simulador de Meta")
+    m_sim = st.number_input("Monto gasto proyectado $", min_value=0)
+    if st.button("¿Consultar viabilidad?"):
+        if (total_patrimonio - m_sim) < 100000:
+            st.error(f"❌ PELIGRO. Tu saldo caería a ${total_patrimonio - m_sim:,.0f}, por debajo de tu meta de ahorro.")
         else:
-            st.success(f"✅ APROBADO. Te quedarían ${disponible - 100000:,.0f} adicionales después de proteger tu ahorro.")
+            st.success(f"✅ VIABLE. Tu ahorro de $100.000 está protegido.")
 
-# Botón de reinicio en Sidebar
-if st.sidebar.button("🗑️ REINICIAR TODO"):
+if st.sidebar.button("🗑️ REINICIAR DATOS"):
     pd.DataFrame(columns=['FECHA', 'TIPO', 'CUENTA', 'CATEGORIA', 'DESC', 'MONTO']).to_csv(FILE_DB, index=False)
     st.rerun()
