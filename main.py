@@ -46,31 +46,6 @@ TEXTS = {
         "undo_btn": "🔙 DESHACER ÚLTIMO REGISTRO",
         "cap_total": "CAPITAL TOTAL DISPONIBLE",
         "aho_saldo": "SALDO EN AHORRO",
-    },
-    "pt": {
-        "config_title": "🚀 Configuração Inicial",
-        "name_label": "Como você se chama?",
-        "meta_label": "Meta de economia mensal",
-        "ctas_label": "Suas contas",
-        "venc_label": "Gastos com VENCIMENTO",
-        "diario_label": "Gastos DIÁRIOS",
-        "save_config": "Salvar Configuração",
-        "meta_actual": "🎯 Meta de Economia Atual:",
-        "reset_btn": "🚨 Reiniciar Sistema",
-        "tab_reg": "📝 REGISTRO",
-        "tab_aho": "🏦 POUPANÇA",
-        "tab_res": "📊 RESUMO",
-        "tab_ia": "🕵️ ANALISTA IA",
-        "type_op": "Tipo",
-        "gasto": "GASTO",
-        "ingreso": "RECEITA",
-        "cat_label": "Categoria",
-        "monto_label": "Valor $",
-        "desc_label": "Descrição",
-        "save_reg": "💾 SALVAR REGISTRO",
-        "undo_btn": "🔙 DESFAZER ÚLTIMO REGISTRO",
-        "cap_total": "CAPITAL TOTAL DISPONÍVEL",
-        "aho_saldo": "SALDO EM POUPANÇA",
     }
 }
 
@@ -81,7 +56,6 @@ if os.path.exists(FILE_CONFIG):
         USER_NAME = config["nombre"]
         L = config.get("idioma", "es")
         T = TEXTS[L]
-        
         if "meta_dinamica" not in st.session_state:
             st.session_state.meta_dinamica = float(config["meta"])
         CUENTAS_LISTA = [c.strip() for c in config["cuentas"].split(",")]
@@ -93,9 +67,7 @@ if os.path.exists(FILE_CONFIG):
         st.stop()
 else:
     st.title(f"🚀 Setup")
-    lang_setup = st.selectbox("Idioma", ["Español", "Português"])
-    L = "es" if lang_setup == "Español" else "pt"
-    T = TEXTS[L]
+    T = TEXTS["es"]
     with st.form("config_form"):
         nombre = st.text_input(T["name_label"])
         meta = st.number_input(T["meta_label"], value=0.0)
@@ -105,7 +77,7 @@ else:
         if st.form_submit_button(T["save_config"]):
             if all([nombre, nombres_ctas, cat_v, cat_d]):
                 pd.DataFrame([{"nombre": nombre, "meta": float(meta), "cuentas": nombres_ctas, 
-                               "cat_vencimiento": cat_v, "cat_diarias": cat_d, "idioma": L}]).to_csv(FILE_CONFIG, index=False)
+                               "cat_vencimiento": cat_v, "cat_diarias": cat_d, "idioma": "es"}]).to_csv(FILE_CONFIG, index=False)
                 st.rerun()
     st.stop()
 
@@ -115,7 +87,6 @@ if not os.path.exists(FILE_DB):
 df_mov = pd.read_csv(FILE_DB)
 
 # --- CÁLCULOS ---
-# Para simplificar, si no hay cuenta, usamos la primera de la lista como 'Principal'
 default_cta = CUENTAS_LISTA[0]
 saldos = {cta: 0.0 for cta in CUENTAS_LISTA + ["Ahorro"]}
 for _, row in df_mov.iterrows():
@@ -139,44 +110,31 @@ st.session_state.meta_dinamica = st.number_input(T["meta_actual"], value=st.sess
 
 tabs = st.tabs([T["tab_reg"], T["tab_aho"], T["tab_res"], T["tab_ia"]])
 
-# --- REGISTRO SIMPLIFICADO ---
+# --- PESTAÑA REGISTRO ---
 with tabs[0]:
     t_op = st.radio(T["type_op"], [T["gasto"], T["ingreso"]], horizontal=True)
     c1, c2 = st.columns(2)
-    
     if t_op == T["gasto"]:
         sub_t = c1.selectbox("Frecuencia", ["Vencimiento", "Diario"])
         f_cat = c1.selectbox(T["cat_label"], CAT_VENC if sub_t == "Vencimiento" else CAT_DIARIO)
         f_fec = c2.date_input("Fecha") if sub_t == "Vencimiento" else datetime.now().date()
-        # Se elimina la selección de cuenta de origen para gastos
         f_cta = default_cta 
     else:
         f_cta = c1.selectbox("Destino (Cuenta)", CUENTAS_LISTA)
         f_fec = datetime.now().date()
         f_cat = "INGRESO"
-
     raw_mto = st.text_input(T["monto_label"], key=f"m_{st.session_state.get('form_tick', 0)}")
     f_des = st.text_input(T["desc_label"], key=f"d_{st.session_state.get('form_tick', 0)}").upper()
-
     if st.button(T["save_reg"], use_container_width=True):
         clean_mto = raw_mto.replace(".", "").replace(",", "")
         if clean_mto.isdigit() and int(clean_mto) > 0:
             m_tipo = "GASTO" if t_op == T["gasto"] else "INGRESO"
             nuevo = pd.DataFrame([[str(f_fec), m_tipo, f_cta, f_cat, f_des, int(clean_mto)]], columns=df_mov.columns)
             pd.concat([df_mov, nuevo], ignore_index=True).to_csv(FILE_DB, index=False)
-            
-            if m_tipo == "GASTO" and sub_t == "Vencimiento":
-                p = urllib.parse.urlencode({"action":"TEMPLATE","text":f"PAGAR {f_des}","dates":f"{str(f_fec).replace('-','')}/{str(f_fec).replace('-','')}"})
-                st.session_state.cal_link = f"https://www.google.com/calendar/render?{p}"
-            else: st.session_state.cal_link = None
-            
             st.session_state.form_tick = st.session_state.get('form_tick', 0) + 1
             st.rerun()
-    
-    if st.session_state.get("cal_link"):
-        st.link_button("📅 AGENDAR EN CALENDAR", st.session_state.cal_link, use_container_width=True)
 
-# --- AHORROS ---
+# --- PESTAÑA AHORROS ---
 with tabs[1]:
     col_a1, col_a2 = st.columns(2)
     with col_a1:
@@ -196,7 +154,7 @@ with tabs[1]:
                 mov = pd.DataFrame([[str(datetime.now().date()), "RETIRO AHORRO", acc_des, "AHORRO", "RETIRO", int(mto_ret)]], columns=df_mov.columns)
                 pd.concat([df_mov, mov], ignore_index=True).to_csv(FILE_DB, index=False); st.rerun()
 
-# --- RESUMEN ---
+# --- PESTAÑA RESUMEN (ACTUALIZADA) ---
 with tabs[2]:
     if not df_mov.empty and st.button(T["undo_btn"]):
         df_mov[:-1].to_csv(FILE_DB, index=False); st.rerun()
@@ -206,18 +164,57 @@ with tabs[2]:
     c_aho.metric(T["aho_saldo"], f"${saldos['Ahorro']:,.0f}")
     c_meta.metric("Diferencia Meta", f"${(saldos['Ahorro'] - st.session_state.meta_dinamica):,.0f}")
     
+    st.divider()
+    st.subheader("📊 Análisis por Categoría")
+    
+    # Filtrar solo gastos para el análisis
+    df_gastos = df_mov[df_mov["TIPO"] == "GASTO"].copy()
+    if not df_gastos.empty:
+        # Agrupar y sumar
+        resumen_cat = df_gastos.groupby("CATEGORIA")["MONTO"].sum().sort_values(ascending=False)
+        
+        # Mostrar como progreso / barras
+        for cat, monto in resumen_cat.items():
+            col_c, col_m = st.columns([3, 1])
+            col_c.write(f"**{cat}**")
+            col_m.write(f"${monto:,.0f}")
+            # Barra de porcentaje visual (basada en el gasto total)
+            st.progress(min(monto / resumen_cat.sum(), 1.0))
+        
+        # ALERTA DE IA PROACTIVA
+        max_cat = resumen_cat.index[0]
+        st.warning(f"⚠️ **Alerta de Gasto:** Tu mayor fuga de dinero está en **{max_cat}** con ${resumen_cat[max_cat]:,.0f}")
+    else:
+        st.info("Aún no hay gastos registrados para analizar.")
+
+    st.divider()
     st.dataframe(df_mov.sort_values(by="FECHA", ascending=False), use_container_width=True)
 
-# --- IA ---
+# --- PESTAÑA IA ---
 with tabs[3]:
     api_key = st.secrets.get("GROQ_API_KEY")
     if api_key:
         client = Groq(api_key=api_key)
-        user_ask = st.text_input(f"Consulta a tu analista:")
-        if user_ask:
-            ctx = f"Capital: {total_capital}, Ahorro: {saldos['Ahorro']}, Meta: {st.session_state.meta_dinamica}"
+        # Resumen de datos para la IA
+        gastos_texto = ""
+        if not df_gastos.empty:
+            resumen_cat = df_gastos.groupby("CATEGORIA")["MONTO"].sum()
+            gastos_texto = resumen_cat.to_string()
+        
+        st.subheader("🕵️ Análisis Inteligente")
+        if st.button("✨ GENERAR CONSEJO PROACTIVO"):
+            ctx = f"Usuario: {USER_NAME}. Capital: {total_capital}. Ahorro: {saldos['Ahorro']}. Meta: {st.session_state.meta_dinamica}. Gastos por categoría: {gastos_texto}"
             chat = client.chat.completions.create(
-                messages=[{"role": "system", "content": "Asesor breve."},
+                messages=[{"role": "system", "content": "Eres un analista financiero. Analiza los gastos y da un consejo específico para alcanzar la meta de ahorro. Sé breve y directo."},
+                          {"role": "user", "content": ctx}],
+                model="llama-3.1-8b-instant")
+            st.success(chat.choices[0].message.content)
+            
+        user_ask = st.text_input(f"O hazle una pregunta directa:")
+        if user_ask:
+            ctx = f"Capital: {total_capital}, Ahorro: {saldos['Ahorro']}, Meta: {st.session_state.meta_dinamica}. Gastos: {gastos_texto}"
+            chat = client.chat.completions.create(
+                messages=[{"role": "system", "content": "Asesor financiero breve."},
                           {"role": "user", "content": f"Contexto: {ctx}. Pregunta: {user_ask}"}],
                 model="llama-3.1-8b-instant")
             st.info(chat.choices[0].message.content)
