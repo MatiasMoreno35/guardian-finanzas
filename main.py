@@ -27,8 +27,8 @@ TEXTS = {
         "name_label": "¿Cómo te llamas?",
         "meta_label": "Meta de ahorro mensual",
         "ctas_label": "Tus cuentas (ej: Billetera, Banco, Ahorro)",
-        "venc_label": "Gastos con VENCIMIENTO",
-        "diario_label": "Gastos DIARIOS",
+        "venc_label": "Gastos con VENCIMIENTO (separados por coma)",
+        "diario_label": "Gastos DIARIOS (separados por coma)",
         "save_config": "Guardar Configuración",
         "meta_actual": "🎯 Meta de Ahorro Actual:",
         "reset_btn": "🚨 Reiniciar Sistema",
@@ -49,6 +49,15 @@ TEXTS = {
     }
 }
 
+# --- BOTÓN DE REINICIAR / BORRAR (En barra lateral, solicitado para pruebas) ---
+st.sidebar.title("🛠️ Administración")
+if st.sidebar.button(TEXTS["es"]["reset_btn"], use_container_width=True):
+    if os.path.exists(FILE_CONFIG):
+        os.remove(FILE_CONFIG)
+    if os.path.exists(FILE_DB):
+        os.remove(FILE_DB)
+    st.rerun()
+
 # --- CARGAR CONFIGURACIÓN ---
 if os.path.exists(FILE_CONFIG):
     try:
@@ -61,24 +70,58 @@ if os.path.exists(FILE_CONFIG):
         CUENTAS_LISTA = [c.strip() for c in config["cuentas"].split(",")]
         CAT_VENC = [c.strip() for c in config["cat_vencimiento"].split(",")]
         CAT_DIARIO = [c.strip() for c in config["cat_diarias"].split(",")]
+        
+        # Recuperar nuevas variables del perfil inicial
+        INGRESO_NETO = float(config.get("ingreso_neto", 0.0))
+        PAGA_VIVIENDA = config.get("paga_vivienda", "No")
+        MONTO_VIVIENDA = float(config.get("monto_vivienda", 0.0))
+        GASTOS_FINANCIEROS = float(config.get("gastos_financieros", 0.0))
+        GASTOS_BASICOS = float(config.get("gastos_basicos", 0.0))
+        
     except:
         st.error("Error cargando config.")
-        if st.button("Reconfigurar"): os.remove(FILE_CONFIG); st.rerun()
+        if st.button("Reconfigurar"): 
+            if os.path.exists(FILE_CONFIG): os.remove(FILE_CONFIG)
+            st.rerun()
         st.stop()
 else:
     st.title(f"🚀 Setup")
     T = TEXTS["es"]
     with st.form("config_form"):
-        nombre = st.text_input(T["name_label"])
+        nombre = st.text_input(T["name_label"]).upper() # Nombre forzado a mayúsculas
+        ingreso_neto = st.number_input("Ingreso Neto Mensual ($):", min_value=0.0, step=10000.0, value=0.0)
         meta = st.number_input(T["meta_label"], value=0.0)
         nombres_ctas = st.text_input(T["ctas_label"])
+        
+        st.subheader("🏠 Situación de Vivienda")
+        paga_vivienda = st.radio("¿Pagas actualmente arriendo o dividendo?", ["Sí", "No"])
+        monto_vivienda = st.number_input("Monto mensual estimado de Vivienda ($):", min_value=0.0, step=10000.0, value=0.0)
+
+        st.subheader("💳 Otros Gastos Mensuales Estimados")
+        gastos_financieros = st.number_input("Gastos Financieros / Deudas ($):", min_value=0.0, step=5000.0, value=0.0)
+        gastos_basicos = st.number_input("Gastos Básicos Estimados (Comida, Servicios) ($):", min_value=0.0, step=5000.0, value=0.0)
+
         cat_v = st.text_input(T["venc_label"])
         cat_d = st.text_input(T["diario_label"])
+        
         if st.form_submit_button(T["save_config"]):
-            if all([nombre, nombres_ctas, cat_v, cat_d]):
-                pd.DataFrame([{"nombre": nombre, "meta": float(meta), "cuentas": nombres_ctas, 
-                               "cat_vencimiento": cat_v, "cat_diarias": cat_d, "idioma": "es"}]).to_csv(FILE_CONFIG, index=False)
+            if all([nombre, nombres_ctas, cat_v, cat_d]) and ingreso_neto > 0:
+                pd.DataFrame([{
+                    "nombre": nombre, 
+                    "ingreso_neto": float(ingreso_neto),
+                    "meta": float(meta), 
+                    "cuentas": nombres_ctas, 
+                    "paga_vivienda": paga_vivienda,
+                    "monto_vivienda": float(monto_vivienda) if paga_vivienda == "Sí" else 0.0,
+                    "gastos_financieros": float(gastos_financieros),
+                    "gastos_basicos": float(gastos_basicos),
+                    "cat_vencimiento": cat_v, 
+                    "cat_diarias": cat_d, 
+                    "idioma": "es"
+                }]).to_csv(FILE_CONFIG, index=False)
                 st.rerun()
+            else:
+                st.error("Por favor completa los campos y asegúrate de que el ingreso neto sea mayor a 0.")
     st.stop()
 
 # --- BASE DE DATOS ---
@@ -124,7 +167,7 @@ with tabs[0]:
         f_fec = datetime.now().date()
         f_cat = "INGRESO"
     raw_mto = st.text_input(T["monto_label"], key=f"m_{st.session_state.get('form_tick', 0)}")
-    f_des = st.text_input(T["desc_label"], key=f"d_{st.session_state.get('form_tick', 0)}").upper()
+    f_des = st.text_input(T["desc_label"], key=f"d_{st.session_state.get('form_tick', 0)}").upper() # Manteniendo mayúsculas consistentemente
     if st.button(T["save_reg"], use_container_width=True):
         clean_mto = raw_mto.replace(".", "").replace(",", "")
         if clean_mto.isdigit() and int(clean_mto) > 0:
@@ -154,7 +197,7 @@ with tabs[1]:
                 mov = pd.DataFrame([[str(datetime.now().date()), "RETIRO AHORRO", acc_des, "AHORRO", "RETIRO", int(mto_ret)]], columns=df_mov.columns)
                 pd.concat([df_mov, mov], ignore_index=True).to_csv(FILE_DB, index=False); st.rerun()
 
-# --- PESTAÑA RESUMEN (ACTUALIZADA) ---
+# --- PESTAÑA RESUMEN ---
 with tabs[2]:
     if not df_mov.empty and st.button(T["undo_btn"]):
         df_mov[:-1].to_csv(FILE_DB, index=False); st.rerun()
@@ -165,23 +208,73 @@ with tabs[2]:
     c_meta.metric("Diferencia Meta", f"${(saldos['Ahorro'] - st.session_state.meta_dinamica):,.0f}")
     
     st.divider()
-    st.subheader("📊 Análisis por Categoría")
     
-    # Filtrar solo gastos para el análisis
+    # Lógica de Escalas Basadas en el Análisis del Video
+    st.subheader("🎯 Análisis y Distribución de Escalas (Modelo del Video)")
+    
+    # Porcentajes Teóricos sugeridos
+    pct_ahorro = 0.10
+    pct_vivienda = 0.30
+    pct_financiero = 0.15
+    pct_basicos = 0.20
+    pct_variables = 0.25
+
+    # Redistribución si NO paga vivienda
+    if PAGA_VIVIENDA == "No":
+        pct_vivienda = 0.0
+        pct_ahorro += 0.15      # +15% ahorro
+        pct_variables += 0.15   # +15% variables
+        st.info("💡 Optimización: Al no pagar arriendo o dividendo, se reasigna el 30% disponible sumando 15% a tu Ahorro y 15% a tus Gastos Variables.")
+    else:
+        st.info("📋 Distribución estándar activa: Incluye el tope máximo sugerido de 30% para gastos de vivienda.")
+
+    # Montos ideales sugeridos según el Ingreso Neto real
+    monto_ideal_ahorro = INGRESO_NETO * pct_ahorro
+    monto_ideal_vivienda = INGRESO_NETO * pct_vivienda
+    monto_ideal_financiero = INGRESO_NETO * pct_financiero
+    monto_ideal_basicos = INGRESO_NETO * pct_basicos
+    monto_ideal_variables = INGRESO_NETO * pct_variables
+
+    col_t1, col_t2 = st.columns(2)
+    
+    with col_t1:
+        st.write("**Tus Límites Sugeridos:**")
+        datos_tabla = {
+            "Categoría": ["Ahorro (Mínimo)", "Vivienda (Máximo)", "Gastos Financieros / Deudas", "Gastos Básicos", "Gastos Variables"],
+            "Porcentaje": [f"{int(pct_ahorro*100)}%", f"{int(pct_vivienda*100)}%", f"{int(pct_financiero*100)}%", f"{int(pct_basicos*100)}%", f"{int(pct_variables*100)}%"],
+            "Monto Sugerido": [f"${int(monto_ideal_ahorro):,}", f"${int(monto_ideal_vivienda):,}", f"${int(monto_financiero := monto_ideal_financiero):,}", f"${int(monto_ideal_basicos):,}", f"${int(monto_ideal_variables):,}"]
+        }
+        st.table(pd.DataFrame(datos_tabla))
+
+    with col_t2:
+        st.write("**Diagnóstico con Datos Iniciales:**")
+        st.write(f"**Ingreso Declarado:** ${INGRESO_NETO:,.0f}")
+        if PAGA_VIVIENDA == "Sí":
+            if MONTO_VIVIENDA > monto_ideal_vivienda:
+                st.warning(f"⚠️ Vivienda (${MONTO_VIVIENDA:,.0f}) supera el 30% recomendado (${monto_ideal_vivienda:,.0f}).")
+            else:
+                st.success(f"✅ Gasto en vivienda (${MONTO_VIVIENDA:,.0f}) bajo el límite.")
+        
+        if GASTOS_FINANCIEROS > monto_ideal_financiero:
+            st.error(f"🚨 Deudas (${GASTOS_FINANCIEROS:,.0f}) exceden el 15% recomendado (${monto_ideal_financiero:,.0f}).")
+        else:
+            st.success(f"✅ Gastos financieros bajo control.")
+            
+        if GASTOS_BASICOS > monto_ideal_basicos:
+            st.warning(f"⚠️ Gastos básicos (${GASTOS_BASICOS:,.0f}) son mayores al 20% estimado.")
+
+    st.divider()
+    st.subheader("📊 Análisis por Categoría Real")
+    
     df_gastos = df_mov[df_mov["TIPO"] == "GASTO"].copy()
     if not df_gastos.empty:
-        # Agrupar y sumar
         resumen_cat = df_gastos.groupby("CATEGORIA")["MONTO"].sum().sort_values(ascending=False)
-        
-        # Mostrar como progreso / barras
         for cat, monto in resumen_cat.items():
             col_c, col_m = st.columns([3, 1])
             col_c.write(f"**{cat}**")
             col_m.write(f"${monto:,.0f}")
-            # Barra de porcentaje visual (basada en el gasto total)
             st.progress(min(monto / resumen_cat.sum(), 1.0))
         
-        # ALERTA DE IA PROACTIVA
         max_cat = resumen_cat.index[0]
         st.warning(f"⚠️ **Alerta de Gasto:** Tu mayor fuga de dinero está en **{max_cat}** con ${resumen_cat[max_cat]:,.0f}")
     else:
@@ -195,7 +288,6 @@ with tabs[3]:
     api_key = st.secrets.get("GROQ_API_KEY")
     if api_key:
         client = Groq(api_key=api_key)
-        # Resumen de datos para la IA
         gastos_texto = ""
         if not df_gastos.empty:
             resumen_cat = df_gastos.groupby("CATEGORIA")["MONTO"].sum()
