@@ -66,7 +66,7 @@ if str_app.sidebar.button(T["reset_btn"], use_container_width=True):
     for key in list(str_app.session_state.keys()): del str_app.session_state[key]
     str_app.rerun()
 
-# --- CARGAR CONFIGURACIÓN O INICIALIZAR ---
+# --- CARGAR CONFIGURACIÓN O INICIALIZAR CONTROLES ---
 if os.path.exists(FILE_CONFIG):
     try:
         config = pd.read_csv(FILE_CONFIG).iloc[0].to_dict()
@@ -75,19 +75,22 @@ if os.path.exists(FILE_CONFIG):
             str_app.session_state.meta_dinamica = int(config["meta"])
         CUENTAS_LISTA = [c.strip() for c in config["cuentas"].split("|")]
         CATEGORIAS_RELEVANTES = ["VIVIENDA (CUENTAS BASICAS)", "CUOTAS DE COMPRAS", "SERVICIOS PERSONALES"]
+        INGRESO_NETO = int(config.get("ingreso_neto", 0))
     except:
-        str_app.error("Error cargando configuración.")
+        str_app.error("Error cargando configuración histórica.")
         str_app.stop()
 else:
     str_app.title(T["config_title"])
     nombre = str_app.text_input(T["name_label"]).upper()
+    ingreso_neto = str_app.number_input("Ingresos Netos Mensuales ($):", min_value=0, step=1000, value=None, placeholder="Ej: 1200000")
     meta = str_app.number_input(T["meta_label"], min_value=0, step=1000, value=None, placeholder="Ej: 200000")
-    bancos_seleccionados = str_app.multiselect("Selecciona tus bancos:", BANCOS_CHILE)
+    
+    bancos_seleccionados = str_app.multiselect("Selecciona tus bancos e instituciones:", BANCOS_CHILE)
     cuentas_finales = [f"{b} (Corriente)" for b in bancos_seleccionados] if bancos_seleccionados else ["Mi Cuenta Única"]
 
     if str_app.button("💾 INICIAR SISTEMA", use_container_width=True):
-        if nombre:
-            pd.DataFrame([{"nombre": nombre, "meta": int(meta if meta else 0), "cuentas": " | ".join(cuentas_finales)}]).to_csv(FILE_CONFIG, index=False)
+        if nombre and ingreso_neto and ingreso_neto > 0:
+            pd.DataFrame([{"nombre": nombre, "ingreso_neto": int(ingreso_neto), "meta": int(meta if meta else 0), "cuentas": " | ".join(cuentas_finales)}]).to_csv(FILE_CONFIG, index=False)
             if not os.path.exists(FILE_DB):
                 pd.DataFrame(columns=['FECHA', 'TIPO', 'CUENTA', 'CATEGORIA', 'DESC', 'MONTO']).to_csv(FILE_DB, index=False)
             str_app.rerun()
@@ -97,7 +100,6 @@ else:
 if os.path.exists(FILE_DB):
     try:
         df_mov = pd.read_csv(FILE_DB)
-        # Forzar consistencia de tipos
         df_mov['MONTO'] = pd.to_numeric(df_mov['MONTO'], errors='coerce').fillna(0).astype(int)
     except:
         df_mov = pd.DataFrame(columns=['FECHA', 'TIPO', 'CUENTA', 'CATEGORIA', 'DESC', 'MONTO'])
@@ -107,7 +109,7 @@ else:
 
 cuenta_defecto = CUENTAS_LISTA[0]
 
-# --- CÁLCULO DE CAPITAL TOTAL (FLUJO TRANSACCIONAL PURO) ---
+# --- CÁLCULO DE CAPITAL TOTAL (TRANSACCIONAL PURO) ---
 total_capital = 0
 for _, row in df_mov.iterrows():
     m = int(row['MONTO'])
@@ -186,7 +188,7 @@ with tabs[2]:
             pd.concat([df_mov, nuevo_aho], ignore_index=True).to_csv(FILE_DB, index=False)
             str_app.rerun()
 
-# --- 4. PESTAÑA RESUMEN (CALENDARIO COMPLETO Y TOTALES) ---
+# --- 4. PESTAÑA RESUMEN (RESTAURADO: CALENDARIO Y DESGLOSE INDIVIDUAL DE GASTOS) ---
 with tabs[3]:
     if not df_mov.empty and str_app.button(T["undo_btn"]):
         df_mov = df_mov.iloc[:-1]
@@ -195,17 +197,25 @@ with tabs[3]:
     
     str_app.metric(T["cap_total"], f"${total_capital:,.0f}".replace(",", "."))
     
-    # --- ANÁLISIS ESTRUCTURAL POR CATEGORÍAS ---
-    str_app.subheader("📊 Análisis Estructural")
+    # --- ANÁLISIS ESTRUCTURAL Y DESGLOSE DE GASTOS ---
+    str_app.subheader("📊 Análisis Estructural por Categorías")
     
     total_ingresos_mes = df_mov[df_mov["TIPO"] == "INGRESO"]["MONTO"].sum()
     df_gastos = df_mov[df_mov["TIPO"] == "GASTO"].copy()
     resumen_cat = df_gastos.groupby("CATEGORIA")["MONTO"].sum() if not df_gastos.empty else {}
     
     str_app.write(f"🟢 **INGRESOS REGISTRADOS:** ${total_ingresos_mes:,.0f}".replace(",", "."))
+    
+    # Mapeo exhaustivo para mostrar la suma y el desglose de cada ítem histórico
     for cat in ["VIVIENDA (CUENTAS BASICAS)", "CUOTAS DE COMPRAS", "SERVICIOS PERSONALES", "GASTOS DIARIOS"]:
         m = resumen_cat.get(cat, 0) if isinstance(resumen_cat, pd.Series) else 0
         str_app.write(f"🔴 **{cat}:** ${int(m):,.0f}".replace(",", "."))
+        
+        # RESTAURADO: Filtrar y desplegar cada gasto individual de esta categoría en el CSV
+        df_sub_cat = df_gastos[df_gastos["CATEGORIA"] == cat]
+        if not df_sub_cat.empty:
+            for _, g_fila in df_sub_cat.iterrows():
+                str_app.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;📄 *{g_fila['FECHA']}* | {g_fila['DESC']} | **${int(g_fila['MONTO']):,.0f}**".replace(",", "."))
 
     # --- PROCESAMIENTO MATRICIAL DEL CALENDARIO ---
     str_app.divider()
@@ -228,7 +238,7 @@ with tabs[3]:
             else:
                 datos_dias[d_real] = 1 if datos_dias[d_real] == 0 else 3
 
-    # REGLA 3: Buscar vencimientos en toda la BD histórica (Garantiza ver el día 31 y cualquier otro)
+    # REGLA 3: Buscar vencimientos en toda la BD histórica (Ver el día 31 y cualquier otro)
     for _, fila in df_mov.iterrows():
         if "[Vence: " in str(fila['DESC']):
             try:
@@ -293,7 +303,7 @@ with tabs[3]:
     else:
         str_app.warning("Selecciona haciendo clic arriba en cualquier fila del calendario para cargar dinámicamente el desglose de los días.")
 
-# --- 5. PESTAÑA IA (RESTAURADO EL CHAT COMPLETO CON PREGUNTA) ---
+# --- 5. PESTAÑA IA ---
 with tabs[4]:
     str_app.subheader("🕵️ Chat Interactivo con el Analista IA")
     api_key = str_app.secrets.get("GROQ_API_KEY")
@@ -301,7 +311,6 @@ with tabs[4]:
     if api_key:
         client = Groq(api_key=api_key)
         
-        # Cuadro de entrada interactivo para el usuario
         user_query = str_app.text_input("Hazle una pregunta a la IA sobre tu estado financiero o movimientos:", key="ia_chat_query").upper()
         
         if str_app.button("✨ CONSULTAR AL ANALISTA", use_container_width=True):
