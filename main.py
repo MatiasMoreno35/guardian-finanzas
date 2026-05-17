@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import os
-import urllib.parse
 from groq import Groq
 
 # --- CONFIGURACIÓN DE PÁGINA ---
@@ -20,30 +19,52 @@ if not os.path.exists(base_path):
 FILE_DB = os.path.join(base_path, f"movimientos_{user_id}.csv")
 FILE_CONFIG = os.path.join(base_path, f"config_{user_id}.csv")
 
-# --- TRADUCCIONES Y TEXTOS ---
+# --- LISTA OFICIAL DE BANCOS DE CHILE ---
+BANCOS_CHILE = [
+    "001 - Banco de Chile",
+    "012 - BancoEstado (Banco del Estado de Chile)",
+    "014 - Scotiabank Chile",
+    "016 - Banco Bci (Banco de Crédito e Inversiones)",
+    "028 - Banco BICE",
+    "037 - Banco Santander Chile",
+    "039 - Banco Itaú",
+    "049 - Banco Security",
+    "051 - Banco Falabella",
+    "053 - Banco Ripley",
+    "055 - Banco Consorcio",
+    "009 - Banco Internacional",
+    "672 - Coopeuch",
+    "730 - Tenpo Prepago",
+    "729 - Prepago Los Héroes",
+    "732 - Tapp (Prepago Los Andes)",
+    "031 - HSBC Bank Chile",
+    "059 - Banco BTG Pactual Chile",
+    "041 - JP Morgan Chase Bank",
+    "045 - China Construction Bank"
+]
+
+# --- TEXTOS TRADUCCIONES ---
 TEXTS = {
     "es": {
         "config_title": "🚀 Configuración Inicial",
         "name_label": "¿Cómo te llamas?",
         "meta_label": "Meta de ahorro mensual ($)",
-        "ctas_label": "Tus cuentas de origen (ej: Efectivo, CuentaRut, Débito)",
-        "save_config": "Guardar Perfil y Calcular Escalas",
+        "save_config": "Guardar Configuración Inicial",
         "reset_btn": "🚨 Reiniciar Sistema",
-        "tab_reg": "📝 REGISTRO DE GASTOS",
-        "tab_res": "📊 RESUMEN Y ESCALAS",
+        "tab_reg": "📝 BITÁCORA DIARIA (REGISTRO)",
+        "tab_res": "📊 RESUMEN Y ANÁLISIS",
         "tab_ia": "🕵️ ANALISTA IA",
-        "type_op": "Tipo",
+        "type_op": "Tipo de Operación",
         "gasto": "GASTO",
         "ingreso": "INGRESO",
-        "cat_label": "Categoría (Modelo del Video)",
-        "monto_label": "Monto $ (Sin decimales)",
-        "desc_label": "Descripción / Detalle",
-        "save_reg": "💾 GUARDAR REGISTRO",
+        "cat_label": "Categoría del Gasto",
+        "monto_label": "Monto $ (Pesos Chilenos sin puntos)",
+        "desc_label": "Descripción / Detalle del movimiento",
+        "save_reg": "💾 GUARDAR EN BITÁCORA",
         "undo_btn": "🔙 DESHACER ÚLTIMO REGISTRO",
-        "cap_total": "CAPITAL TOTAL DISPONIBLE",
+        "cap_total": "CAPITAL TOTAL EN CUENTAS",
     }
 }
-
 T = TEXTS["es"]
 
 # --- BOTÓN DE REINICIAR / BORRAR (Barra Lateral) ---
@@ -51,6 +72,8 @@ st.sidebar.title("🛠️ Administración")
 if st.sidebar.button(T["reset_btn"], use_container_width=True):
     if os.path.exists(FILE_CONFIG): os.remove(FILE_CONFIG)
     if os.path.exists(FILE_DB): os.remove(FILE_DB)
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
     st.rerun()
 
 # --- CARGAR CONFIGURACIÓN ---
@@ -58,18 +81,13 @@ if os.path.exists(FILE_CONFIG):
     try:
         config = pd.read_csv(FILE_CONFIG).iloc[0].to_dict()
         USER_NAME = config["nombre"]
-        
-        # Carga de variables nativas en formato entero (Sin decimales)
         INGRESO_NETO = int(config.get("ingreso_neto", 0))
-        META_AHORRO = int(config.get("meta", 0))
-        CUENTAS_LISTA = [c.strip() for c in config["cuentas"].split(",")]
-        PAGA_VIVIENDA = config.get("paga_vivienda", "No")
-        MONTO_VIVIENDA = int(config.get("monto_vivienda", 0))
-        GASTOS_FINANCIEROS = int(config.get("gastos_financieros", 0))
-        GASTOS_BASICOS = int(config.get("gastos_basicos", 0))
         
-        # Categorías fijas del video
-        CATEGORIAS_VIDEO = ["Ahorro", "Vivienda", "Gastos Financieros", "Gastos Básicos", "Gastos Variables"]
+        if "meta_dinamica" not in st.session_state:
+            st.session_state.meta_dinamica = float(config["meta"])
+            
+        CUENTAS_LISTA = [c.strip() for c in config["cuentas"].split("|")]
+        CATEGORIAS_SISTEMA = ["VIVIENDA (CUENTAS BASICAS)", "CUOTAS DE COMPRAS", "SERVICIOS PERSONALES", "GASTOS DIARIOS"]
     except:
         st.error("Error cargando la configuración.")
         if st.button("Reconfigurar"): 
@@ -78,45 +96,92 @@ if os.path.exists(FILE_CONFIG):
         st.stop()
 else:
     st.title(T["config_title"])
-    st.write("Configura tu perfil inicial con valores enteros (Pesos Chilenos).")
+    st.write("Configura tu perfil de control de gastos en Pesos Chilenos (valores sin decimales).")
+    
+    if "filas_vivienda" not in st.session_state: st.session_state.filas_vivienda = 1
+    if "filas_cuotas" not in st.session_state: st.session_state.filas_cuotas = 1
+    if "filas_servicios" not in st.session_state: st.session_state.filas_servicios = 1
+
     with st.form("config_form"):
         nombre = st.text_input(T["name_label"]).upper()
-        ingreso_neto = st.number_input("Ingreso Neto Mensual ($):", min_value=0, step=10000, value=0)
+        ingreso_neto = st.number_input("Ingresos Netos Mensuales ($):", min_value=0, step=10000, value=0)
         meta = st.number_input(T["meta_label"], min_value=0, step=10000, value=0)
-        nombres_ctas = st.text_input(T["ctas_label"])
         
-        st.subheader("🏠 Situación de Vivienda")
-        paga_vivienda = st.radio("¿Pagas actualmente arriendo o dividendo?", ["Sí", "No"])
-        monto_vivienda = st.number_input("Monto mensual de tu Vivienda ($):", min_value=0, step=10000, value=0)
+        st.subheader("🏦 Cuentas Bancarias")
+        bancos_seleccionados = st.multiselect("Selecciona tus bancos e instituciones:", BANCOS_CHILE)
+        
+        tipos_cuentas = {}
+        if bancos_seleccionados:
+            st.write("*Define el tipo de cuenta para cada institución seleccionada:*")
+            for bco in bancos_seleccionados:
+                tipos_cuentas[bco] = st.selectbox(f"Tipo para {bco}:", ["Vista", "Corriente"], key=f"tipo_{bco}")
+        
+        st.divider()
+        st.subheader("1. VIVIENDA (CUENTAS BÁSICAS)")
+        gastos_vivienda_items = []
+        for i in range(st.session_state.filas_vivienda):
+            c1, c2 = st.columns([2, 1])
+            n_g = c1.text_input(f"Descripción Gasto {i+1} (ej: Arriendo, Luz)", key=f"viv_n_{i}").upper()
+            m_g = c2.number_input(f"Monto $", min_value=0, step=1000, key=f"viv_m_{i}", value=0)
+            if n_g and m_g > 0: gastos_vivienda_items.append((n_g, m_g))
+            
+        st.subheader("2. CUOTAS DE COMPRAS")
+        gastos_cuotas_items = []
+        for i in range(st.session_state.filas_cuotas):
+            c1, c2 = st.columns([2, 1])
+            n_g = c1.text_input(f"Descripción Gasto {i+1} (ej: Tarjeta CMR, Crédito)", key=f"cuo_n_{i}").upper()
+            m_g = c2.number_input(f"Monto $", min_value=0, step=1000, key=f"cuo_m_{i}", value=0)
+            if n_g and m_g > 0: gastos_cuotas_items.append((n_g, m_g))
 
-        st.subheader("💳 Otros Gastos Mensuales Fijos")
-        gastos_financieros = st.number_input("Gastos Financieros / Deudas ($):", min_value=0, step=5000, value=0)
-        gastos_basicos = st.number_input("Gastos Básicos Estimados (Comida, Servicios) ($):", min_value=0, step=5000, value=0)
+        st.subheader("3. SERVICIOS PERSONALES")
+        gastos_servicios_items = []
+        for i in range(st.session_state.filas_servicios):
+            c1, c2 = st.columns([2, 1])
+            n_g = c1.text_input(f"Descripción Gasto {i+1} (ej: Netflix, Gimnasio)", key=f"ser_n_{i}").upper()
+            m_g = c2.number_input(f"Monto $", min_value=0, step=1000, key=f"ser_m_{i}", value=0)
+            if n_g and m_g > 0: gastos_servicios_items.append((n_g, m_g))
+
+        st.write("💡 *Si necesitas agregar más filas de gastos a los bloques, usa los botones de abajo antes de guardar.*")
+        guardar_todo = st.form_submit_button(T["save_config"])
         
-        if st.form_submit_button(T["save_config"]):
-            if all([nombre, nombres_ctas]) and ingreso_neto > 0:
-                pd.DataFrame([{
-                    "nombre": nombre, 
-                    "ingreso_neto": int(ingreso_neto),
-                    "meta": int(meta), 
-                    "cuentas": nombres_ctas, 
-                    "paga_vivienda": paga_vivienda,
-                    "monto_vivienda": int(monto_vivienda) if paga_vivienda == "Sí" else 0,
-                    "gastos_financieros": int(gastos_financieros),
-                    "gastos_basicos": int(gastos_basicos)
-                }]).to_csv(FILE_CONFIG, index=False)
-                st.rerun()
-            else:
-                st.error("Por favor completa los campos obligatorios. El ingreso debe ser mayor a 0.")
+    c_b1, c_b2, c_b3 = st.columns(3)
+    if c_b1.button("➕ Más filas en Vivienda"): st.session_state.filas_vivienda += 1; st.rerun()
+    if c_b2.button("➕ Más filas en Cuotas"): st.session_state.filas_cuotas += 1; st.rerun()
+    if c_b3.button("➕ Más filas en Servicios"): st.session_state.filas_servicios += 1; st.rerun()
+
+    if guardar_todo:
+        if nombre and ingreso_neto > 0 and bancos_seleccionados:
+            cuentas_procesadas = [f"{bco} ({tipos_cuentas[bco]})" for bco in bancos_seleccionados]
+            string_cuentas = " | ".join(cuentas_procesadas)
+            
+            pd.DataFrame([{
+                "nombre": nombre, 
+                "ingreso_neto": int(ingreso_neto),
+                "meta": int(meta), 
+                "cuentas": string_cuentas
+            }]).to_csv(FILE_CONFIG, index=False)
+            
+            registros_iniciales = []
+            fecha_hoy = str(datetime.now().date())
+            
+            for n, m in gastos_vivienda_items:
+                registros_iniciales.append([fecha_hoy, "GASTO", cuentas_procesadas[0], "VIVIENDA (CUENTAS BASICAS)", n, int(m)])
+            for n, m in gastos_cuotas_items:
+                registros_iniciales.append([fecha_hoy, "GASTO", cuentas_procesadas[0], "CUOTAS DE COMPRAS", n, int(m)])
+            for n, m in gastos_servicios_items:
+                registros_iniciales.append([fecha_hoy, "GASTO", cuentas_procesadas[0], "SERVICIOS PERSONALES", n, int(m)])
+                
+            df_inicial = pd.DataFrame(registros_iniciales, columns=['FECHA', 'TIPO', 'CUENTA', 'CATEGORIA', 'DESC', 'MONTO'])
+            df_inicial.to_csv(FILE_DB, index=False)
+            st.rerun()
+        else:
+            st.error("Por favor completa los datos básicos (Nombre, Ingreso) y selecciona al menos una cuenta bancaria.")
     st.stop()
 
-# --- BASE DE DATOS ---
-if not os.path.exists(FILE_DB):
-    pd.DataFrame(columns=['FECHA', 'TIPO', 'CUENTA', 'CATEGORIA', 'DESC', 'MONTO']).to_csv(FILE_DB, index=False)
+# --- CARGAR BASE DE DATOS TRAS EL SETUP ---
 df_mov = pd.read_csv(FILE_DB)
 
 # --- CÁLCULOS DE SALDOS ---
-default_cta = CUENTAS_LISTA[0]
 saldos = {cta: 0 for cta in CUENTAS_LISTA}
 for _, row in df_mov.iterrows():
     try:
@@ -127,23 +192,24 @@ for _, row in df_mov.iterrows():
     except: continue
 total_capital = sum(saldos[c] for c in CUENTAS_LISTA)
 
-# --- INTERFAZ ---
-st.title(f"📊 Control de Gastos - {USER_NAME}")
+# --- INTERFAZ PANEL DE CONTROL ---
+st.title(f"📊 Control de Gastos - Perfil: {USER_NAME}")
+st.session_state.meta_dinamica = st.number_input("🎯 Meta de Ahorro Actual:", value=st.session_state.meta_dinamica, step=10000.0)
 
-# Tabs mutados (Se quitó la pestaña de Ahorros por el momento)
 tabs = st.tabs([T["tab_reg"], T["tab_res"], T["tab_ia"]])
 
-# --- PESTAÑA REGISTRO ---
+# --- PESTAÑA 1: BITÁCORA DIARIA (REGISTRO) ---
 with tabs[0]:
+    st.subheader("🖋️ Registrar Movimiento del Día")
     t_op = st.radio(T["type_op"], [T["gasto"], T["ingreso"]], horizontal=True)
     c1, c2 = st.columns(2)
     
     if t_op == T["gasto"]:
-        f_cat = c1.selectbox(T["cat_label"], CATEGORIAS_VIDEO)
-        f_cta = c2.selectbox("Pagar desde (Cuenta)", CUENTAS_LISTA)
+        f_cat = c1.selectbox(T["cat_label"], CATEGORIAS_SISTEMA, index=3) # GASTOS DIARIOS por defecto
+        f_cta = c2.selectbox("Pagar desde Cuenta", CUENTAS_LISTA)
         f_fec = datetime.now().date()
     else:
-        f_cta = c1.selectbox("Destino (Cuenta)", CUENTAS_LISTA)
+        f_cta = c1.selectbox("Destino del Ingreso", CUENTAS_LISTA)
         f_cat = "INGRESO"
         f_fec = datetime.now().date()
         
@@ -159,92 +225,44 @@ with tabs[0]:
             st.session_state.form_tick = st.session_state.get('form_tick', 0) + 1
             st.rerun()
 
-# --- PESTAÑA RESUMEN Y ESCALAS ---
+# --- PESTAÑA 2: RESUMEN Y ANÁLISIS ---
 with tabs[1]:
     if not df_mov.empty and st.button(T["undo_btn"]):
         df_mov[:-1].to_csv(FILE_DB, index=False); st.rerun()
-    
+        
     st.metric(T["cap_total"], f"${total_capital:,.0f}".replace(",", "."))
     
-    st.divider()
-    st.subheader("🎯 Comparativa de Distribución (Modelo del Video)")
-    
-    # Porcentajes Teóricos sugeridos
-    pct_ahorro = 0.10
-    pct_vivienda = 0.30
-    pct_financiero = 0.15
-    pct_basicos = 0.20
-    pct_variables = 0.25
-
-    # Redistribución si NO paga vivienda (30% se divide 15% ahorro y 15% variables)
-    if PAGA_VIVIENDA == "No":
-        pct_vivienda = 0.0
-        pct_ahorro += 0.15
-        pct_variables += 0.15
-        st.info("💡 Optimización Dinámica: Al no registrar gastos de vivienda, se reasignó un 15% adicional a tu capacidad de Ahorro y un 15% a tus Gastos Variables.")
-    else:
-        st.info("📋 Distribución estándar activa. Se asigna un tope máximo del 30% para gastos de vivienda.")
-
-    # Montos ideales calculados (Casteados a entero para evitar decimales)
-    monto_ideal_ahorro = int(INGRESO_NETO * pct_ahorro)
-    monto_ideal_vivienda = int(INGRESO_NETO * pct_vivienda)
-    monto_ideal_financiero = int(INGRESO_NETO * pct_financiero)
-    monto_ideal_basicos = int(INGRESO_NETO * pct_basicos)
-    monto_ideal_variables = int(INGRESO_NETO * pct_variables)
-
-    col_t1, col_t2 = st.columns(2)
-    
-    with col_t1:
-        st.write("**Límites Ideales Basados en tus Ingresos:**")
-        datos_tabla = {
-            "Categoría": ["Ahorro (Mínimo)", "Vivienda (Máximo)", "Gastos Financieros / Deudas", "Gastos Básicos", "Gastos Variables"],
-            "Porcentaje": [f"{int(pct_ahorro*100)}%", f"{int(pct_vivienda*100)}%", f"{int(pct_financiero*100)}%", f"{int(pct_basicos*100)}%", f"{int(pct_variables*100)}%"],
-            "Monto Ideal Mensual": [
-                f"${monto_ideal_ahorro:,.0f}".replace(",", "."),
-                f"${monto_ideal_vivienda:,.0f}".replace(",", "."),
-                f"${monto_ideal_financiero:,.0f}".replace(",", "."),
-                f"${monto_ideal_basicos:,.0f}".replace(",", "."),
-                f"${monto_ideal_variables:,.0f}".replace(",", ".")
-            ]
-        }
-        st.table(pd.DataFrame(datos_tabla))
-
-    with col_t2:
-        st.write("**Diagnóstico con Datos Declarados:**")
-        st.write(f"**Ingreso Neto Mensual:** ${INGRESO_NETO:,.0f}".replace(",", "."))
+    st.write("**Saldos por Cuenta Declarada:**")
+    cc = st.columns(len(CUENTAS_LISTA))
+    for idx, cta in enumerate(CUENTAS_LISTA):
+        cc[idx].metric(cta, f"${saldos[cta]:,.0f}".replace(",", "."))
         
-        if PAGA_VIVIENDA == "Sí":
-            if MONTO_VIVIENDA > monto_ideal_vivienda:
-                st.warning(f"⚠️ Tu vivienda (${MONTO_VIVIENDA:,.0f}) supera el 30% recomendado (${monto_ideal_vivienda:,.0f}).")
-            else:
-                st.success(f"✅ Gasto en vivienda (${MONTO_VIVIENDA:,.0f}) equilibrado.")
-        
-        if GASTOS_FINANCIEROS > monto_ideal_financiero:
-            st.error(f"🚨 Deudas actuales (${GASTOS_FINANCIEROS:,.0f}) exceden el 15% límite recomendación (${monto_ideal_financiero:,.0f}).")
-        else:
-            st.success(f"✅ Carga de deuda bajo control.")
-            
-        if GASTOS_BASICOS > monto_ideal_basicos:
-            st.warning(f"⚠️ Gastos básicos (${GASTOS_BASICOS:,.0f}) superan el 20% estimado.")
-
     st.divider()
-    st.subheader("📊 Historial General de Gastos")
+    st.subheader("🎯 Resumen de Gastos por Categorías Fijas")
     
     df_gastos = df_mov[df_mov["TIPO"] == "GASTO"].copy()
     if not df_gastos.empty:
-        resumen_cat = df_gastos.groupby("CATEGORIA")["MONTO"].sum().sort_values(ascending=False)
-        for cat, monto in resumen_cat.items():
-            col_c, col_m = st.columns([3, 1])
-            col_c.write(f"**{cat}**")
-            col_m.write(f"${int(monto):,.0f}".replace(",", "."))
-            st.progress(min(monto / resumen_cat.sum(), 1.0))
+        resumen_cat = df_gastos.groupby("CATEGORIA")["MONTO"].sum()
+        
+        col_graf1, col_graf2 = st.columns(2)
+        with col_graf1:
+            st.write("**Consumo Actual por Categoría:**")
+            for cat in CATEGORIAS_SISTEMA:
+                monto = resumen_cat.get(cat, 0)
+                st.write(f"**{cat}:** ${int(monto):,.0f}".replace(",", "."))
+                st.progress(min(monto / (df_gastos["MONTO"].sum() if df_gastos["MONTO"].sum() > 0 else 1), 1.0))
+        with col_graf2:
+            st.write("**Análisis de Límites:**")
+            st.write(f"Tu ingreso mensual de referencia es: **${INGRESO_NETO:,.0f}**".replace(",", "."))
+            st.write(f"Tu meta de ahorro mensual establecida es: **${st.session_state.meta_dinamica:,.0f}**".replace(",", "."))
     else:
-        st.info("Aún no hay transacciones en esta simulación.")
+        st.info("Aún no se registran gastos en el historial.")
 
     st.divider()
+    st.write("**Historial Completo de Movimientos (Bitácora):**")
     st.dataframe(df_mov.sort_values(by="FECHA", ascending=False), use_container_width=True)
 
-# --- PESTAÑA IA ---
+# --- PESTAÑA 3: ANALISTA IA ---
 with tabs[2]:
     api_key = st.secrets.get("GROQ_API_KEY")
     if api_key:
@@ -256,9 +274,18 @@ with tabs[2]:
         
         st.subheader("🕵️ Análisis Inteligente")
         if st.button("✨ GENERAR CONSEJO PROACTIVO"):
-            ctx = f"Usuario: {USER_NAME}. Capital: {total_capital}. Ingreso: {INGRESO_NETO}. Gastos por categoría: {gastos_texto}"
+            ctx = f"Usuario: {USER_NAME}. Capital: {total_capital}. Ingreso: {INGRESO_NETO}. Meta: {st.session_state.meta_dinamica}. Gastos por categoría: {gastos_texto}"
             chat = client.chat.completions.create(
-                messages=[{"role": "system", "content": "Eres un analista financiero. Analiza los gastos y da un consejo breve basado en las escalas del video."},
+                messages=[{"role": "system", "content": "Eres un analista financiero. Analiza los gastos y da un consejo breve basado en los parámetros de control de gastos. Sé breve y directo."},
                           {"role": "user", "content": ctx}],
                 model="llama-3.1-8b-instant")
             st.success(chat.choices[0].message.content)
+            
+        user_ask = st.text_input(f"O hazle una pregunta directa:")
+        if user_ask:
+            ctx = f"Capital: {total_capital}, Ingreso: {INGRESO_NETO}, Meta: {st.session_state.meta_dinamica}. Gastos: {gastos_texto}"
+            chat = client.chat.completions.create(
+                messages=[{"role": "system", "content": "Asesor financiero breve."},
+                          {"role": "user", "content": f"Contexto: {ctx}. Pregunta: {user_ask}"}],
+                model="llama-3.1-8b-instant")
+            st.info(chat.choices[0].message.content)
