@@ -113,7 +113,6 @@ else:
 
     nombre = str_app.text_input(T["name_label"]).upper()
     
-    # Valores de forma normal, enteros limpios, con marcador gris (placeholder)
     ingreso_neto = str_app.number_input("Ingresos Netos Mensuales ($):", min_value=0, step=1000, value=None, placeholder="Ej: 1200000")
     meta = str_app.number_input(T["meta_label"], min_value=0, step=1000, value=None, placeholder="Ej: 200000")
     
@@ -145,20 +144,26 @@ else:
                 str_app.rerun()
                 
     if str_app.session_state.lista_vivienda:
-        str_app.dataframe(pd.DataFrame(str_app.session_state.lista_vivienda), use_container_width=True)
+        str_app.dataframe(pd.DataFrame(st.session_state.lista_vivienda), use_container_width=True)
 
     # --- 2. CUOTAS DE COMPRAS ---
     str_app.subheader("2. CUOTAS DE COMPRAS")
     with str_app.popover("➕ Agregar gasto"):
         str_app.write("**Nuevo Gasto de Cuotas**")
-        c_nom = str_app.text_input("Nombre del gasto (ej: Tarjeta CMR, Crédito):", key=f"c_nom_{str_app.session_state.tick_cuo}").upper()
-        c_mto = str_app.number_input("Monto ($):", min_value=0, step=1000, value=None, placeholder="Ej: 45000", key=f"c_mto_{str_app.session_state.tick_cuo}")
+        c_nom = str_app.text_input("Nombre del gasto (ej: Casa Comercial, Crédito):", key=f"c_nom_{str_app.session_state.tick_cuo}").upper()
+        c_mto = str_app.number_input("Monto de la Cuota ($):", min_value=0, step=1000, value=None, placeholder="Ej: 45000", key=f"c_mto_{str_app.session_state.tick_cuo}")
+        
+        # --- NUEVO CONTADOR DE CUOTAS INTEGRADO ---
+        c_tot_cuotas = str_app.number_input("¿En cuántas cuotas?", min_value=1, step=1, value=1, key=f"c_tot_{str_app.session_state.tick_cuo}")
+        
         c_venc_check = str_app.checkbox("¿Tiene vencimiento?", key=f"c_vc_{str_app.session_state.tick_cuo}")
         c_venc = str_app.date_input("Fecha de Vencimiento", datetime.now().date(), key=f"c_fec_{str_app.session_state.tick_cuo}") if c_venc_check else "No"
         
         if str_app.button("Confirmar Gasto Cuota"):
             if c_nom and c_mto and c_mto > 0:
-                str_app.session_state.lista_cuotas.append({"desc": c_nom, "monto": int(c_mto), "venc": str(c_venc)})
+                # Estructuramos la descripción para guardar la cuota inicial (Cuota 1/X)
+                desc_con_cuota = f"{c_nom} (Cuota 1/{int(c_tot_cuotas)})"
+                str_app.session_state.lista_cuotas.append({"desc": desc_con_cuota, "monto": int(c_mto), "venc": str(c_venc)})
                 str_app.session_state.tick_cuo += 1
                 str_app.rerun()
                 
@@ -238,7 +243,6 @@ total_capital = sum(saldos[c] for c in CUENTAS_LISTA)
 # --- INTERFAZ CENTRAL ---
 str_app.title(f"💳 Control de Gastos - {USER_NAME}")
 
-# Meta en cabecera en formato normal numérico entero
 st.session_state.meta_dinamica = str_app.number_input(T["meta_actual"], value=int(str_app.session_state.meta_dinamica), step=1000)
 
 tabs = str_app.tabs([T["tab_reg"], T["tab_res"], T["tab_ia"]])
@@ -257,7 +261,7 @@ with tabs[0]:
         f_cat = "INGRESO"
         f_fec = datetime.now().date()
         
-    clean_mto = str_app.number_input(T["monto_label"], min_value=0, step=1000, value=None, placeholder="Ej: 15000", key=f"m_{str_app.get_tracker if hasattr(str_app, 'get_tracker') else str_app.session_state.get('form_tick', 0)}")
+    clean_mto = str_app.number_input(T["monto_label"], min_value=0, step=1000, value=None, placeholder="Ej: 15000", key=f"m_{str_app.session_state.get('form_tick', 0)}")
     f_des = str_app.text_input(T["desc_label"], key=f"d_{str_app.session_state.get('form_tick', 0)}").upper()
     
     if str_app.button(T["save_reg"], use_container_width=True):
@@ -273,7 +277,6 @@ with tabs[1]:
     if not df_mov.empty and str_app.button(T["undo_btn"]):
         df_mov[:-1].to_csv(FILE_DB, index=False); str_app.rerun()
     
-    # Formateo visual solo para lectura final de reportes ($1.000.000)
     str_app.metric(T["cap_total"], f"${total_capital:,.0f}".replace(",", "."))
     
     str_app.write("**Saldos de cuentas actuales:**")
@@ -297,7 +300,7 @@ with tabs[1]:
     else:
         str_app.info("Aún no hay gastos registrados para analizar.")
 
-    str_app.divider()
+    st.divider()
     str_app.dataframe(df_mov.sort_values(by="FECHA", ascending=False), use_container_width=True)
 
 # --- PESTAÑA IA ---
