@@ -56,12 +56,9 @@ TEXTS = {
 if "idioma" not in str_app.session_state:
     str_app.session_state.idioma = "es"
 
-# --- SELECTOR DE IDIOMAS EN LA BARRA LATERAL ---
-str_app.sidebar.title("🌐 Idioma / Language")
-str_app.session_state.idioma = str_app.sidebar.selectbox("Seleccione Idioma:", ["es"], index=0)
 T = TEXTS[str_app.session_state.idioma]
 
-# --- BOTÓN DE REINICIAR ---
+# --- BOTÓN DE REINICIAR EN BARRA LATERAL ---
 str_app.sidebar.title("🛠️ Administración")
 if str_app.sidebar.button(T["reset_btn"], use_container_width=True):
     if os.path.exists(FILE_CONFIG): os.remove(FILE_CONFIG)
@@ -69,7 +66,7 @@ if str_app.sidebar.button(T["reset_btn"], use_container_width=True):
     for key in list(str_app.session_state.keys()): del str_app.session_state[key]
     str_app.rerun()
 
-# --- CARGAR CONFIGURACIÓN ---
+# --- CARGAR CONFIGURACIÓN O INICIALIZAR ---
 if os.path.exists(FILE_CONFIG):
     try:
         config = pd.read_csv(FILE_CONFIG).iloc[0].to_dict()
@@ -78,37 +75,46 @@ if os.path.exists(FILE_CONFIG):
             str_app.session_state.meta_dinamica = int(config["meta"])
         CUENTAS_LISTA = [c.strip() for c in config["cuentas"].split("|")]
         CATEGORIAS_RELEVANTES = ["VIVIENDA (CUENTAS BASICAS)", "CUOTAS DE COMPRAS", "SERVICIOS PERSONALES"]
-        INGRESO_NETO = int(config.get("ingreso_neto", 0))
     except:
-        str_app.error("Error cargando config.")
+        str_app.error("Error cargando configuración.")
         str_app.stop()
 else:
     str_app.title(T["config_title"])
     nombre = str_app.text_input(T["name_label"]).upper()
-    ingreso_neto = str_app.number_input("Ingresos Netos Mensuales ($):", min_value=0, step=1000, value=None, placeholder="Ej: 1200000")
     meta = str_app.number_input(T["meta_label"], min_value=0, step=1000, value=None, placeholder="Ej: 200000")
-    
-    bancos_seleccionados = str_app.multiselect("Selecciona tus bancos e instituciones:", BANCOS_CHILE)
+    bancos_seleccionados = str_app.multiselect("Selecciona tus bancos:", BANCOS_CHILE)
     cuentas_finales = [f"{b} (Corriente)" for b in bancos_seleccionados] if bancos_seleccionados else ["Mi Cuenta Única"]
 
     if str_app.button("💾 INICIAR SISTEMA", use_container_width=True):
-        if nombre and ingreso_neto and ingreso_neto > 0:
-            pd.DataFrame([{"nombre": nombre, "ingreso_neto": int(ingreso_neto), "meta": int(meta if meta else 0), "cuentas": " | ".join(cuentas_finales)}]).to_csv(FILE_CONFIG, index=False)
-            pd.DataFrame(columns=['FECHA', 'TIPO', 'CUENTA', 'CATEGORIA', 'DESC', 'MONTO']).to_csv(FILE_DB, index=False)
+        if nombre:
+            pd.DataFrame([{"nombre": nombre, "meta": int(meta if meta else 0), "cuentas": " | ".join(cuentas_finales)}]).to_csv(FILE_CONFIG, index=False)
+            if not os.path.exists(FILE_DB):
+                pd.DataFrame(columns=['FECHA', 'TIPO', 'CUENTA', 'CATEGORIA', 'DESC', 'MONTO']).to_csv(FILE_DB, index=False)
             str_app.rerun()
     str_app.stop()
 
-# --- OPERACIONES DE BASE DE DATOS ---
-df_mov = pd.read_csv(FILE_DB)
+# --- CARGA Y VERIFICACIÓN DEL CSV DE MOVIMIENTOS ---
+if os.path.exists(FILE_DB):
+    try:
+        df_mov = pd.read_csv(FILE_DB)
+        # Forzar consistencia de tipos
+        df_mov['MONTO'] = pd.to_numeric(df_mov['MONTO'], errors='coerce').fillna(0).astype(int)
+    except:
+        df_mov = pd.DataFrame(columns=['FECHA', 'TIPO', 'CUENTA', 'CATEGORIA', 'DESC', 'MONTO'])
+else:
+    df_mov = pd.DataFrame(columns=['FECHA', 'TIPO', 'CUENTA', 'CATEGORIA', 'DESC', 'MONTO'])
+    df_mov.to_csv(FILE_DB, index=False)
 
 cuenta_defecto = CUENTAS_LISTA[0]
-total_capital, total_ingresos, total_gastos = 0, 0, 0
+
+# --- CÁLCULO DE CAPITAL TOTAL (FLUJO TRANSACCIONAL PURO) ---
+total_capital = 0
 for _, row in df_mov.iterrows():
-    try:
-        m = int(row['MONTO'])
-        if row['TIPO'] == "INGRESO": total_capital += m; total_ingresos += m
-        elif row['TIPO'] == "GASTO": total_capital -= m; total_gastos += m
-    except: continue
+    m = int(row['MONTO'])
+    if row['TIPO'] in ["INGRESO", "AHORRO_ENTRA"]:
+        total_capital += m
+    elif row['TIPO'] in ["GASTO", "AHORRO_SACO"]:
+        total_capital -= m
 
 # --- INTERFAZ CENTRAL ---
 str_app.title(f"💳 Control de Gastos - {USER_NAME}")
@@ -165,50 +171,38 @@ with tabs[1]:
             pd.concat([df_mov, nuevo_rel], ignore_index=True).to_csv(FILE_DB, index=False)
             str_app.rerun()
 
-# --- 3. PESTAÑA AHORRO (DISEÑO AVANZADO RESTAURADO) ---
+# --- 3. PESTAÑA AHORRO (TRANSACCIONAL PURA: ENTRADAS Y SALIDAS) ---
 with tabs[2]:
-    str_app.subheader("📊 Panel Avanzado de Capacidad de Ahorro")
+    str_app.subheader("💰 Registro Transaccional de Fondos de Ahorro")
     
-    monto_ahorrado = max(0, total_ingresos - total_gastos)
-    meta_establecida = str_app.session_state.meta_dinamica if str_app.session_state.meta_dinamica > 0 else 1
-    porcentaje_ahorro = min(monto_ahorrado / meta_establecida, 1.0)
+    tipo_ahorro = str_app.radio("Selecciona Tipo de Transacción de Ahorro:", ["DEPOSITAR EN AHORRO (ENTRA)", "RETIRAR DE AHORRO (SACA)"], horizontal=True)
+    monto_ahorro_trans = str_app.number_input("Monto de la Operación ($):", min_value=0, step=1000, value=None, placeholder="Ej: 50000", key="monto_aho_trans")
+    detalle_ahorro_trans = str_app.text_input("Detalle de la Operación (ej: Fondo Mutuo, Depósito a Plazo):", key="det_aho_trans").upper()
     
-    # Bloques métricos organizados en columnas para balance visual
-    m_col1, m_col2, m_col3 = str_app.columns(3)
-    m_col1.metric("Ingresos Totales del Mes", f"${total_ingresos:,.0f}".replace(",", "."))
-    m_col2.metric("Gastos Totales Ejecutados", f"${total_gastos:,.0f}".replace(",", "."))
-    m_col3.metric("Saldo Líquido Disponible", f"${total_ingresos - total_gastos:,.0f}".replace(",", "."), delta=f"${monto_ahorrado:,.0f}".replace(",", "."))
-    
-    str_app.divider()
-    
-    # Barra de progreso de la meta con porcentajes dinámicos
-    str_app.write(f"🎯 **Progreso Operativo:** Has acumulado **${monto_ahorrado:,.0f}** de tu meta de **${meta_establecida:,.0f}**")
-    str_app.progress(porcentaje_ahorro)
-    
-    col_pct1, col_pct2 = str_app.columns([3, 1])
-    col_pct2.write(f"### **{porcentaje_ahorro * 100:.1f}% Completado**")
-    
-    # Contenedores dinámicos de feedback según rendimiento
-    if porcentaje_ahorro >= 1.0:
-        str_app.success("🎉 ¡Excelente! Has alcanzado o superado el 100% de tu meta de ahorro mensual establecida.")
-    elif porcentaje_ahorro >= 0.5:
-        str_app.info("👍 Buen camino. Has superado el 50% de tu meta. Mantén el control de los gastos diarios para cerrar el mes en verde.")
-    else:
-        str_app.warning("⚠️ Atención: Tu capacidad de ahorro real está por debajo del 50% de la meta configurada. Revisa los gastos relevantes pendientes.")
+    if str_app.button("💾 REGISTRAR MOVIMIENTO DE AHORRO", use_container_width=True):
+        if monto_ahorro_trans and monto_ahorro_trans > 0 and detalle_ahorro_trans:
+            tipo_csv = "AHORRO_ENTRA" if "ENTRA" in tipo_ahorro else "AHORRO_SACO"
+            nuevo_aho = pd.DataFrame([[str(datetime.now().date()), tipo_csv, cuenta_defecto, "AHORRO", detalle_ahorro_trans, int(monto_ahorro_trans)]], columns=df_mov.columns)
+            pd.concat([df_mov, nuevo_aho], ignore_index=True).to_csv(FILE_DB, index=False)
+            str_app.rerun()
 
-# --- 4. PESTAÑA RESUMEN (CALENDARIO EXHAUSTIVO) ---
+# --- 4. PESTAÑA RESUMEN (CALENDARIO COMPLETO Y TOTALES) ---
 with tabs[3]:
     if not df_mov.empty and str_app.button(T["undo_btn"]):
-        df_mov[:-1].to_csv(FILE_DB, index=False); str_app.rerun()
+        df_mov = df_mov.iloc[:-1]
+        df_mov.to_csv(FILE_DB, index=False)
+        str_app.rerun()
     
     str_app.metric(T["cap_total"], f"${total_capital:,.0f}".replace(",", "."))
     
     # --- ANÁLISIS ESTRUCTURAL POR CATEGORÍAS ---
     str_app.subheader("📊 Análisis Estructural")
+    
+    total_ingresos_mes = df_mov[df_mov["TIPO"] == "INGRESO"]["MONTO"].sum()
     df_gastos = df_mov[df_mov["TIPO"] == "GASTO"].copy()
     resumen_cat = df_gastos.groupby("CATEGORIA")["MONTO"].sum() if not df_gastos.empty else {}
     
-    str_app.write(f"🟢 **INGRESOS (ENTRADAS DE PLATA):** ${total_ingresos:,.0f}".replace(",", "."))
+    str_app.write(f"🟢 **INGRESOS REGISTRADOS:** ${total_ingresos_mes:,.0f}".replace(",", "."))
     for cat in ["VIVIENDA (CUENTAS BASICAS)", "CUOTAS DE COMPRAS", "SERVICIOS PERSONALES", "GASTOS DIARIOS"]:
         m = resumen_cat.get(cat, 0) if isinstance(resumen_cat, pd.Series) else 0
         str_app.write(f"🔴 **{cat}:** ${int(m):,.0f}".replace(",", "."))
@@ -217,7 +211,6 @@ with tabs[3]:
     str_app.divider()
     hoy = datetime.now()
     str_app.subheader(f"📅 Calendario de Vencimientos y Operaciones Diarias: {calendar.month_name[hoy.month].upper()} {hoy.year}")
-    str_app.info("💡 Haz clic en cualquier semana del calendario para desplegar los detalles abajo automáticamente.")
     
     df_mov['FECHA_DT'] = pd.to_datetime(df_mov['FECHA'])
     
@@ -235,7 +228,7 @@ with tabs[3]:
             else:
                 datos_dias[d_real] = 1 if datos_dias[d_real] == 0 else 3
 
-    # REGLA 3: Mapeo de vencimientos históricos transversales con tipado numérico estricto (Corrige errores con días límite como el 31)
+    # REGLA 3: Buscar vencimientos en toda la BD histórica (Garantiza ver el día 31 y cualquier otro)
     for _, fila in df_mov.iterrows():
         if "[Vence: " in str(fila['DESC']):
             try:
@@ -277,7 +270,7 @@ with tabs[3]:
     
     str_app.caption("Leyenda: ⚪ Sin compromisos | 🔴 Gastos Diarios | 🟢 Ingresos | 🟡 Alertas o Vencimientos")
 
-    # --- PANEL DE DETALLE AUTOMÁTICO AL DAR CLIC (Compatibilidad de índices asegurada) ---
+    # --- PANEL DE DETALLE AUTOMÁTICO AL DAR CLIC ---
     filas_seleccionadas = seleccion_interactiva.get("selection", {}).get("rows", [])
     
     str_app.divider()
@@ -300,14 +293,31 @@ with tabs[3]:
     else:
         str_app.warning("Selecciona haciendo clic arriba en cualquier fila del calendario para cargar dinámicamente el desglose de los días.")
 
-# --- 5. PESTAÑA IA ---
+# --- 5. PESTAÑA IA (RESTAURADO EL CHAT COMPLETO CON PREGUNTA) ---
 with tabs[4]:
+    str_app.subheader("🕵️ Chat Interactivo con el Analista IA")
     api_key = str_app.secrets.get("GROQ_API_KEY")
+    
     if api_key:
         client = Groq(api_key=api_key)
-        if str_app.button("✨ GENERAR CONSEJO PROACTIVO"):
-            chat = client.chat.completions.create(
-                messages=[{"role": "system", "content": "Asesor breve de finanzas chilenas."},
-                          {"role": "user", "content": f"Capital: {total_capital}. Ingresos: {total_ingresos}. Gastos: {total_gastos}"}],
-                model="llama-3.1-8b-instant")
-            str_app.success(chat.choices[0].message.content)
+        
+        # Cuadro de entrada interactivo para el usuario
+        user_query = str_app.text_input("Hazle una pregunta a la IA sobre tu estado financiero o movimientos:", key="ia_chat_query").upper()
+        
+        if str_app.button("✨ CONSULTAR AL ANALISTA", use_container_width=True):
+            if user_query:
+                contexto_datos = f"Datos actuales del sistema -> Capital Total: {total_capital}. Resumen movimientos: {str(df_mov[['FECHA', 'TIPO', 'CATEGORIA', 'DESC', 'MONTO']].tail(20).to_dict(orient='records'))}"
+                
+                with str_app.spinner("Analizando información..."):
+                    chat = client.chat.completions.create(
+                        messages=[
+                            {"role": "system", "content": "Eres un asistente y analista financiero experto para Chile. Responde de forma concisa y directa, siempre en mayúsculas."},
+                            {"role": "user", "content": f"Contexto financiero: {contexto_datos}. Pregunta del usuario: {user_query}"}
+                        ],
+                        model="llama-3.1-8b-instant"
+                    )
+                str_app.success(chat.choices[0].message.content)
+            else:
+                str_app.warning("Por favor escribe una pregunta antes de consultar.")
+    else:
+        str_app.error("No se detectó la clave de API (GROQ_API_KEY) en los secretos de Streamlit.")
