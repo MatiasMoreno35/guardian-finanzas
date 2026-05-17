@@ -86,13 +86,24 @@ if st.sidebar.button(T["reset_btn"], use_container_width=True):
         del st.session_state[key]
     st.rerun()
 
+# --- FUNCIÓN PARA FORMATEAR EN TIEMPO REAL (PESOS CHILENOS) ---
+def format_clp(val_str):
+    clean = "".join(filter(str.isdigit, val_str))
+    if clean == "" or clean == "0":
+        return "$0"
+    return f"${int(clean):,}".replace(",", ".")
+
+def clean_to_int(val_str):
+    clean = "".join(filter(str.isdigit, val_str))
+    return int(clean) if clean else 0
+
 # --- CARGAR CONFIGURACIÓN ---
 if os.path.exists(FILE_CONFIG):
     try:
         config = pd.read_csv(FILE_CONFIG).iloc[0].to_dict()
         USER_NAME = config["nombre"]
         if "meta_dinamica" not in st.session_state:
-            st.session_state.meta_dinamica = float(config["meta"])
+            st.session_state.meta_dinamica = int(config["meta"])
         CUENTAS_LISTA = [c.strip() for c in config["cuentas"].split("|")]
         CATEGORIAS_SISTEMA = ["VIVIENDA (CUENTAS BASICAS)", "CUOTAS DE COMPRAS", "SERVICIOS PERSONALES", "GASTOS DIARIOS"]
         INGRESO_NETO = int(config.get("ingreso_neto", 0))
@@ -104,21 +115,39 @@ if os.path.exists(FILE_CONFIG):
         st.stop()
 else:
     st.title(T["config_title"])
-    st.write("Configura tu perfil de control de gastos en Pesos Chilenos (valores sin decimales).")
+    st.write("Configura tu perfil de control de gastos en Pesos Chilenos sin decimales.")
     
-    # Inicialización de listas en session_state para los modales/popovers de gastos iniciales
+    # Inicialización de listas y ticks de limpieza para los popovers
     if "lista_vivienda" not in st.session_state: st.session_state.lista_vivienda = []
     if "lista_cuotas" not in st.session_state: st.session_state.lista_cuotas = []
     if "lista_servicios" not in st.session_state: st.session_state.lista_servicios = []
+    
+    if "tick_viv" not in st.session_state: st.session_state.tick_viv = 0
+    if "tick_cuo" not in st.session_state: st.session_state.tick_cuo = 0
+    if "tick_ser" not in st.session_state: st.session_state.tick_ser = 0
 
     nombre = st.text_input(T["name_label"]).upper()
-    ingreso_neto = st.number_input("Ingresos Netos Mensuales ($):", min_value=0, step=10000, value=0)
-    meta = st.number_input(T["meta_label"], value=0.0, step=10000.0)
+    
+    # Inputs con formateador visual nativo en CLP sin decimales
+    raw_ing = st.text_input("Ingresos Netos Mensuales $:", value="$0")
+    formatted_ing = format_clp(raw_ing)
+    if raw_ing != formatted_ing:
+        st.text_input("Ingresos Netos Mensuales $:", value=formatted_ing, key="ing_input")
+        ingreso_neto = clean_to_int(formatted_ing)
+    else:
+        ingreso_neto = clean_to_int(raw_ing)
+        
+    raw_meta = st.text_input(T["meta_label"] + " $:", value="$0")
+    formatted_meta = format_clp(raw_meta)
+    if raw_meta != formatted_meta:
+        st.text_input(T["meta_label"] + " $:", value=formatted_meta, key="meta_input")
+        meta = clean_to_int(formatted_meta)
+    else:
+        meta = clean_to_int(raw_meta)
     
     st.subheader("🏦 Cuentas Bancarias")
     bancos_seleccionados = st.multiselect("Selecciona tus bancos e instituciones:", BANCOS_CHILE)
     
-    # Discriminación inmediata de cuentas (Vista/Corriente) al ser seleccionadas
     cuentas_finales = []
     if bancos_seleccionados:
         st.write("*Define el tipo de cuenta para cada institución seleccionada:*")
@@ -132,14 +161,20 @@ else:
     st.subheader("1. VIVIENDA (CUENTAS BASICAS)")
     with st.popover("➕ Agregar gasto"):
         st.write("**Nuevo Gasto de Vivienda / Básica**")
-        v_nom = st.text_input("Nombre del gasto (ej: Arriendo, Luz):", key="v_nom_pop").upper()
-        v_mto = st.number_input("Monto $:", min_value=0, step=1000, key="v_mto_pop")
-        v_venc_check = st.checkbox("¿Tiene vencimiento?", key="v_vc_pop")
-        v_venc = st.date_input("Fecha de Vencimiento", datetime.now().date(), key="v_fec_pop") if v_venc_check else "No"
+        v_nom = st.text_input("Nombre del gasto (ej: Arriendo, Luz):", key=f"v_nom_{st.session_state.tick_viv}").upper()
+        v_mto_raw = st.text_input("Monto $:", value="$0", key=f"v_raw_{st.session_state.tick_viv}")
+        st.session_state[f"v_raw_{st.session_state.tick_viv}"] = format_clp(v_mto_raw)
+        v_mto = clean_to_int(st.session_state[f"v_raw_{st.session_state.tick_viv}"])
+        
+        v_venc_check = st.checkbox("¿Tiene vencimiento?", key=f"v_vc_{st.session_state.tick_viv}")
+        v_venc = st.date_input("Fecha de Vencimiento", datetime.now().date(), key=f"v_fec_{st.session_state.tick_viv}") if v_venc_check else "No"
+        
         if st.button("Confirmar Gasto Vivienda"):
             if v_nom and v_mto > 0:
-                st.session_state.lista_vivienda.append({"desc": v_nom, "monto": int(v_mto), "venc": str(v_venc)})
+                st.session_state.lista_vivienda.append({"desc": v_nom, "monto": v_mto, "venc": str(v_venc)})
+                st.session_state.tick_viv += 1  # Esto destruye los widgets viejos y los fuerza a vaciarse ($0)
                 st.rerun()
+                
     if st.session_state.lista_vivienda:
         st.dataframe(pd.DataFrame(st.session_state.lista_vivienda), use_container_width=True)
 
@@ -147,14 +182,20 @@ else:
     st.subheader("2. CUOTAS DE COMPRAS")
     with st.popover("➕ Agregar gasto"):
         st.write("**Nuevo Gasto de Cuotas**")
-        c_nom = st.text_input("Nombre del gasto (ej: Tarjeta CMR, Crédito):", key="c_nom_pop").upper()
-        c_mto = st.number_input("Monto $:", min_value=0, step=1000, key="c_mto_pop")
-        c_venc_check = st.checkbox("¿Tiene vencimiento?", key="c_vc_pop")
-        c_venc = st.date_input("Fecha de Vencimiento", datetime.now().date(), key="c_fec_pop") if c_venc_check else "No"
+        c_nom = st.text_input("Nombre del gasto (ej: Tarjeta CMR, Crédito):", key=f"c_nom_{st.session_state.tick_cuo}").upper()
+        c_mto_raw = st.text_input("Monto $:", value="$0", key=f"c_raw_{st.session_state.tick_cuo}")
+        st.session_state[f"c_raw_{st.session_state.tick_cuo}"] = format_clp(c_mto_raw)
+        c_mto = clean_to_int(st.session_state[f"c_raw_{st.session_state.tick_cuo}"])
+        
+        c_venc_check = st.checkbox("¿Tiene vencimiento?", key=f"c_vc_{st.session_state.tick_cuo}")
+        c_venc = st.date_input("Fecha de Vencimiento", datetime.now().date(), key=f"c_fec_{st.session_state.tick_cuo}") if c_venc_check else "No"
+        
         if st.button("Confirmar Gasto Cuota"):
             if c_nom and c_mto > 0:
-                st.session_state.lista_cuotas.append({"desc": c_nom, "monto": int(c_mto), "venc": str(c_venc)})
+                st.session_state.lista_cuotas.append({"desc": c_nom, "monto": c_mto, "venc": str(c_venc)})
+                st.session_state.tick_cuo += 1
                 st.rerun()
+                
     if st.session_state.lista_cuotas:
         st.dataframe(pd.DataFrame(st.session_state.lista_cuotas), use_container_width=True)
 
@@ -162,34 +203,37 @@ else:
     st.subheader("3. SERVICIOS PERSONALES")
     with st.popover("➕ Agregar gasto"):
         st.write("**Nuevo Servicio Personal**")
-        s_nom = st.text_input("Nombre del gasto (ej: Netflix, Gimnasio):", key="s_nom_pop").upper()
-        s_mto = st.number_input("Monto $:", min_value=0, step=1000, key="s_mto_pop")
-        s_venc_check = st.checkbox("¿Tiene vencimiento?", key="s_vc_pop")
-        s_venc = st.date_input("Fecha de Vencimiento", datetime.now().date(), key="s_fec_pop") if s_venc_check else "No"
+        s_nom = st.text_input("Nombre del gasto (ej: Netflix, Gimnasio):", key=f"s_nom_{st.session_state.tick_ser}").upper()
+        s_mto_raw = st.text_input("Monto $:", value="$0", key=f"s_raw_{st.session_state.tick_ser}")
+        st.session_state[f"s_raw_{st.session_state.tick_ser}"] = format_clp(s_mto_raw)
+        s_mto = clean_to_int(st.session_state[f"s_raw_{st.session_state.tick_ser}"])
+        
+        s_venc_check = st.checkbox("¿Tiene vencimiento?", key=f"s_vc_{st.session_state.tick_ser}")
+        s_venc = st.date_input("Fecha de Vencimiento", datetime.now().date(), key=f"s_fec_{st.session_state.tick_ser}") if s_venc_check else "No"
+        
         if st.button("Confirmar Gasto Servicio"):
             if s_nom and s_mto > 0:
-                st.session_state.lista_servicios.append({"desc": s_nom, "monto": int(s_mto), "venc": str(s_venc)})
+                st.session_state.lista_servicios.append({"desc": s_nom, "monto": s_mto, "venc": str(s_venc)})
+                st.session_state.tick_ser += 1
                 st.rerun()
+                
     if st.session_state.lista_servicios:
         st.dataframe(pd.DataFrame(st.session_state.lista_servicios), use_container_width=True)
 
     st.divider()
     
-    # Botón final para consolidar el setup completo
     if st.button("💾 GUARDAR TODO E INICIAR SISTEMA", use_container_width=True):
         if nombre and ingreso_neto > 0 and cuentas_finales:
             string_cuentas = " | ".join(cuentas_finales)
             
-            # Guardar configuraciones maestras
             pd.DataFrame([{
                 "nombre": nombre, 
                 "ingreso_neto": int(ingreso_neto),
-                "meta": float(meta), 
+                "meta": int(meta), 
                 "cuentas": string_cuentas,
                 "idioma": "es"
             }]).to_csv(FILE_CONFIG, index=False)
             
-            # Construir la base de datos con los gastos precargados
             registros_iniciales = []
             fecha_hoy = str(datetime.now().date())
             
@@ -230,16 +274,20 @@ total_capital = sum(saldos[c] for c in CUENTAS_LISTA)
 
 # --- INTERFAZ CENTRAL ---
 st.title(f"💳 Control de Gastos - {USER_NAME}")
-st.session_state.meta_dinamica = st.number_input(T["meta_actual"], value=st.session_state.meta_dinamica, step=10000.0)
+
+# Formateador también para el input de meta dinámica en la cabecera
+raw_meta_din = st.text_input(T["meta_actual"], value=format_clp(str(int(st.session_state.meta_dinamica))))
+st.session_state.meta_dinamica = clean_to_int(raw_meta_din)
 
 tabs = st.tabs([T["tab_reg"], T["tab_res"], T["tab_ia"]])
 
-# --- PESTAÑA REGISTRO (CON GASTOS DIARIOS POR DEFECTO) ---
+# --- PESTAÑA REGISTRO (CON MONTO FORMATEADO EN VIVO) ---
 with tabs[0]:
+    st.subheader("🖋️ Registrar Movimiento del Día")
     t_op = st.radio(T["type_op"], [T["gasto"], T["ingreso"]], horizontal=True)
     c1, c2 = st.columns(2)
     if t_op == T["gasto"]:
-        f_cat = c1.selectbox(T["cat_label"], CATEGORIAS_SISTEMA, index=3) # GASTOS DIARIOS por defecto en Bitácora
+        f_cat = c1.selectbox(T["cat_label"], CATEGORIAS_SISTEMA, index=3) # GASTOS DIARIOS por defecto
         f_cta = c2.selectbox("Pagar desde (Cuenta)", CUENTAS_LISTA)
         f_fec = datetime.now().date()
     else:
@@ -247,14 +295,16 @@ with tabs[0]:
         f_cat = "INGRESO"
         f_fec = datetime.now().date()
         
-    raw_mto = st.text_input(T["monto_label"], key=f"m_{st.session_state.get('form_tick', 0)}")
+    raw_mto_reg = st.text_input(T["monto_label"], value="$0", key=f"m_{st.session_state.get('form_tick', 0)}")
+    st.session_state[f"m_{st.session_state.get('form_tick', 0)}"] = format_clp(raw_mto_reg)
+    clean_mto = clean_to_int(st.session_state[f"m_{st.session_state.get('form_tick', 0)}"])
+    
     f_des = st.text_input(T["desc_label"], key=f"d_{st.session_state.get('form_tick', 0)}").upper()
     
     if st.button(T["save_reg"], use_container_width=True):
-        clean_mto = raw_mto.replace(".", "").replace(",", "")
-        if clean_mto.isdigit() and int(clean_mto) > 0:
+        if clean_mto > 0 and f_des:
             m_tipo = "GASTO" if t_op == T["gasto"] else "INGRESO"
-            nuevo = pd.DataFrame([[str(f_fec), m_tipo, f_cta, f_cat, f_des, int(clean_mto)]], columns=df_mov.columns)
+            nuevo = pd.DataFrame([[str(f_fec), m_tipo, f_cta, f_cat, f_des, clean_mto]], columns=df_mov.columns)
             pd.concat([df_mov, nuevo], ignore_index=True).to_csv(FILE_DB, index=False)
             st.session_state.form_tick = st.session_state.get('form_tick', 0) + 1
             st.rerun()
@@ -304,7 +354,7 @@ with tabs[2]:
         if st.button("✨ GENERAR CONSEJO PROACTIVO"):
             ctx = f"Usuario: {USER_NAME}. Capital: {total_capital}. Ingreso: {INGRESO_NETO}. Meta: {st.session_state.meta_dinamica}. Gastos por categoría: {gastos_texto}"
             chat = client.chat.completions.create(
-                messages=[{"role": "system", "content": "Eres un analista financiero. Analiza los gastos y da un consejo específico para alcanzar la meta de ahorro. Sé breve y directo."},
+                messages=[{"role": "system", "content": "Eres un analista financiero. Analiza los gastos y da un consejo específico para alcanzar la meta de ahorro. Sé breve y directo en español de Chile sin usar decimales."},
                           {"role": "user", "content": ctx}],
                 model="llama-3.1-8b-instant")
             st.success(chat.choices[0].message.content)
