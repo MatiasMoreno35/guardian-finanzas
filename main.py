@@ -1,6 +1,7 @@
 import streamlit as str_app
 import pandas as pd
 from datetime import datetime
+import calendar
 import os
 from groq import Groq
 
@@ -226,15 +227,21 @@ if not os.path.exists(FILE_DB):
 df_mov = pd.read_csv(FILE_DB)
 
 # --- CÁLCULOS DE SALDOS ---
-# Mantenemos la lógica interna indexada para el pozo común sin preguntarle al usuario
 cuenta_defecto = CUENTAS_LISTA[0]
 total_capital = 0
+total_ingresos = 0
+total_gastos = 0
+
 for _, row in df_mov.iterrows():
     try:
         m = int(row['MONTO'])
         tipo = row['TIPO']
-        if tipo == "INGRESO": total_capital += m
-        elif tipo == "GASTO": total_capital -= m
+        if tipo == "INGRESO":
+            total_capital += m
+            total_ingresos += m
+        elif tipo == "GASTO":
+            total_capital -= m
+            total_gastos += m
     except: continue
 
 # --- INTERFAZ CENTRAL ---
@@ -244,7 +251,7 @@ str_app.session_state.meta_dinamica = str_app.number_input(T["meta_actual"], val
 
 tabs = str_app.tabs([T["tab_reg"], T["tab_rel"], T["tab_res"], T["tab_ia"]])
 
-# --- 1. PESTAÑA REGISTRO DIARIO (GASTO DIARIO / INGRESO) ---
+# --- 1. PESTAÑA REGISTRO DIARIO ---
 with tabs[0]:
     str_app.subheader("🖋️ Bitácora de Movimientos del Día")
     t_op = str_app.radio(T["type_op"], [T["gasto"], T["ingreso"]], horizontal=True)
@@ -260,12 +267,11 @@ with tabs[0]:
 
     clean_mto = str_app.number_input(T["monto_label"], min_value=0, step=1000, value=None, placeholder="Ej: 15000", key=f"m_{str_app.session_state.get('form_tick', 0)}")
     
-    # Manejo de la descripción adaptiva
     if t_op == T["gasto"]:
         if sub_cat == "OTROS":
             f_des = str_app.text_input(T["desc_label"] + " (Especifica qué compraste):", key=f"d_{str_app.session_state.get('form_tick', 0)}").upper()
         else:
-            f_des = sub_cat  # Se guarda directamente TRANSPORTE o COMIDA
+            f_des = sub_cat
     else:
         f_des = str_app.text_input(T["desc_label"] + " (ej: Sueldo, Transferencia):", key=f"d_{str_app.session_state.get('form_tick', 0)}").upper()
     
@@ -277,16 +283,14 @@ with tabs[0]:
             str_app.session_state.form_tick = str_app.session_state.get('form_tick', 0) + 1
             str_app.rerun()
 
-# --- 2. NUEVA PESTAÑA: GASTO RELEVANTE ---
+# --- 2. PESTAÑA GASTO RELEVANTE ---
 with tabs[1]:
     str_app.subheader("🔥 Registrar un Compromiso o Gasto Relevante")
-    str_app.write("Registra aquí los gastos estructurales o de gran relevancia.")
     
     rel_cat = str_app.selectbox("Selecciona Categoría Relevante:", CATEGORIAS_RELEVANTES)
     rel_nom = str_app.text_input("Nombre / Descripción del Gasto Relevante:", key="rel_nom_input").upper()
     rel_mto = str_app.number_input("Monto de la Cuota o Gasto ($):", min_value=0, step=1000, value=None, placeholder="Ej: 80000", key="rel_mto_input")
     
-    # Si es cuota, habilitamos el contador dinámico que creamos anteriormente
     if rel_cat == "CUOTAS DE COMPRAS":
         rel_tot_cuotas = str_app.number_input("¿En cuántas cuotas?", min_value=1, step=1, value=1, key="rel_cuotas_input")
     else:
@@ -310,32 +314,90 @@ with tabs[1]:
             str_app.success(f"Gasto relevante '{rel_nom}' ingresado con éxito.")
             str_app.rerun()
 
-# --- 3. PESTAÑA RESUMEN ---
+# --- 3. PESTAÑA RESUMEN (CON CALENDARIO MENSUAL) ---
 with tabs[2]:
     if not df_mov.empty and str_app.button(T["undo_btn"]):
         df_mov[:-1].to_csv(FILE_DB, index=False); str_app.rerun()
     
     str_app.metric(T["cap_total"], f"${total_capital:,.0f}".replace(",", "."))
     
+    # --- BARRA DE PROGRESO DE AHORRO (RESTAURADA) ---
     str_app.divider()
-    str_app.subheader("📊 Análisis por Categoría")
+    str_app.subheader("🎯 Progreso de Ahorro del Mes")
+    monto_ahorrado = max(0, total_ingresos - total_gastos)
+    meta_establecida = str_app.session_state.meta_dinamica if str_app.session_state.meta_dinamica > 0 else 1
+    porcentaje_ahorro = min(monto_ahorrado / meta_establecida, 1.0)
+    
+    col_ah1, col_ah2 = str_app.columns([3, 1])
+    col_ah1.write(f"Ahorro Real Actual: **${monto_ahorrado:,.0f}** de una meta de **${meta_establecida:,.0f}**".replace(",", "."))
+    col_ah2.write(f"**{porcentaje_ahorro * 100:.1f}%**")
+    str_app.progress(porcentaje_ahorro)
+    
+    # --- ANÁLISIS POR CATEGORÍA + SECCIÓN INGRESOS ---
+    str_app.divider()
+    str_app.subheader("📊 Análisis Estructural")
     
     df_gastos = df_mov[df_mov["TIPO"] == "GASTO"].copy()
-    if not df_gastos.empty:
-        resumen_cat = df_gastos.groupby("CATEGORIA")["MONTO"].sum()
-        TODAS_CATEGORIAS = ["VIVIENDA (CUENTAS BASICAS)", "CUOTAS DE COMPRAS", "SERVICIOS PERSONALES", "GASTOS DIARIOS"]
-        
-        for cat in TODAS_CATEGORIAS:
-            monto = resumen_cat.get(cat, 0)
-            col_c, col_m = str_app.columns([3, 1])
-            col_c.write(f"**{cat}**")
-            col_m.write(f"${int(monto):,.0f}".replace(",", "."))
-            str_app.progress(min(monto / (df_gastos["MONTO"].sum() if df_gastos["MONTO"].sum() > 0 else 1), 1.0))
-    else:
-        str_app.info("Aún no hay gastos registrados para analizar.")
+    resumen_cat = df_gastos.groupby("CATEGORIA")["MONTO"].sum() if not df_gastos.empty else {}
+    
+    # Visualización de la nueva barra de ingresos totales
+    col_i1, col_i2 = str_app.columns([3, 1])
+    col_i1.write("🟢 **INGRESOS TOTALES (ENTRADAS DE PLATA)**")
+    col_i2.write(f"${total_ingresos:,.0f}".replace(",", "."))
+    str_app.progress(1.0) # Barra completa referencial
+    
+    # Visualización de las categorías de gastos anteriores
+    TODAS_CATEGORIAS_GASTOS = ["VIVIENDA (CUENTAS BASICAS)", "CUOTAS DE COMPRAS", "SERVICIOS PERSONALES", "GASTOS DIARIOS"]
+    denom_gastos = df_gastos["MONTO"].sum() if not df_gastos.empty and df_gastos["MONTO"].sum() > 0 else 1
+    
+    for cat in TODAS_CATEGORIAS_GASTOS:
+        monto = resumen_cat.get(cat, 0) if isinstance(resumen_cat, pd.Series) else 0
+        col_c, col_m = str_app.columns([3, 1])
+        col_c.write(f"🔴 **{cat}**")
+        col_m.write(f"${int(monto):,.0f}".replace(",", "."))
+        str_app.progress(min(monto / denom_gastos, 1.0))
 
+    # --- NUEVO CALENDARIO MENSUAL DEL MES EN CURSO ---
     str_app.divider()
-    str_app.dataframe(df_mov.sort_values(by="FECHA", ascending=False), use_container_width=True)
+    hoy = datetime.now()
+    str_app.subheader(f"📅 Agenda Visual del Mes: {calendar.month_name[hoy.month].upper()} {hoy.year}")
+    str_app.write("Revisión de gastos e ingresos distribuidos en el tiempo:")
+
+    # Agrupar movimientos por día para mapearlos en el calendario
+    df_mov['FECHA_DT'] = pd.to_datetime(df_mov['FECHA'])
+    df_mes_actual = df_mov[(df_mov['FECHA_DT'].dt.year == hoy.year) & (df_mov['FECHA_DT'].dt.month == hoy.month)]
+    
+    mapa_dias = {}
+    for _, fila in df_mes_actual.iterrows():
+        dia = fila['FECHA_DT'].day
+        if dia not in mapa_dias:
+            mapa_dias[dia] = []
+        mapa_dias[dia].append(fila)
+
+    # Generar la grilla del calendario (Semanas)
+    cal = calendar.Calendar(firstweekday=6) # Empezar en Domingo
+    semanas = cal.monthdayscalendar(hoy.year, hoy.month)
+    
+    dias_semana = ["DOM", "LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB"]
+    cols_dias = str_app.columns(7)
+    for i, d_nom in enumerate(dias_semana):
+        cols_dias[i].markdown(f"<p style='text-align:center; font-weight:bold;'>{d_nom}</p>", unsafe_allow_html=True)
+        
+    for semana in semanas:
+        cols = str_app.columns(7)
+        for i, dia in enumerate(semanal_dia := semana):
+            if dia == 0:
+                cols[i].write("") # Espacio vacío fuera de rango de mes
+            else:
+                # Contenedor visual para cada casilla del día
+                with cols[i].container(border=True):
+                    str_app.markdown(f"**{dia}**")
+                    if dia in mapa_dias:
+                        for mov in mapa_dias[dia]:
+                            color = "green" if mov['TIPO'] == "INGRESO" else "red"
+                            simbolo = "🟢" if mov['TIPO'] == "INGRESO" else "🔴"
+                            texto_item = f"<span style='color:{color}; font-size:12px;'>{simbolo} ${int(mov['MONTO']):,} ({mov['DESC']})</span>"
+                            str_app.markdown(texto_item, unsafe_allow_html=True)
 
 # --- 4. PESTAÑA IA ---
 with tabs[3]:
