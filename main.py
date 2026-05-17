@@ -29,24 +29,30 @@ BANCOS_CHILE = [
     "672 - Coopeuch"
 ]
 
+CATEGORIAS_ESTRICTAS = [
+    "1. VIVIENDA (CUENTAS BASICAS)", 
+    "2. CUOTAS DE COMPRAS", 
+    "3. SERVICIOS PERSONALES"
+]
+
 # --- TRADUCCIONES ---
 TEXTS = {
     "es": {
-        "config_title": "🚀 Configuración Inicial",
-        "name_label": "¿Cómo te llamas?",
-        "meta_label": "Meta de Ahorro Mensual ($)",
-        "meta_actual": "🎯 Meta de Ahorro Actual:",
-        "reset_btn": "🚨 Reiniciar Sistema",
+        "config_title": "🚀 CONFIGURACIÓN INICIAL",
+        "name_label": "¿CÓMO TE LLAMAS?",
+        "meta_label": "META DE AHORRO MENSUAL ($)",
+        "meta_actual": "🎯 META DE AHORRO ACTUAL:",
+        "reset_btn": "🚨 REINICIAR SISTEMA",
         "tab_reg": "📝 REGISTRO DIARIO",
         "tab_rel": "🔥 GASTO RELEVANTE",
         "tab_aho": "🎯 AHORRO",
         "tab_res": "📊 RESUMEN",
         "tab_ia": "🕵️ ANALISTA IA",
-        "type_op": "Tipo de Movimiento",
+        "type_op": "TIPO DE MOVIMIENTO",
         "gasto": "GASTO",
         "ingreso": "INGRESO",
-        "monto_label": "Monto ($)",
-        "desc_label": "Descripción / Detalle",
+        "monto_label": "MONTO ($)",
+        "desc_label": "DESCRIPCIÓN / DETALLE",
         "save_reg": "💾 GUARDAR REGISTRO",
         "undo_btn": "🔙 DESHACER ÚLTIMO REGISTRO",
         "cap_total": "CAPITAL TOTAL DISPONIBLE",
@@ -59,14 +65,14 @@ if "idioma" not in str_app.session_state:
 T = TEXTS[str_app.session_state.idioma]
 
 # --- BOTÓN DE REINICIAR EN BARRA LATERAL ---
-str_app.sidebar.title("🛠️ Administración")
+str_app.sidebar.title("🛠️ ADMINISTRACIÓN")
 if str_app.sidebar.button(T["reset_btn"], use_container_width=True):
     if os.path.exists(FILE_CONFIG): os.remove(FILE_CONFIG)
     if os.path.exists(FILE_DB): os.remove(FILE_DB)
     for key in list(str_app.session_state.keys()): del str_app.session_state[key]
     str_app.rerun()
 
-# --- CARGAR CONFIGURACIÓN O INICIALIZAR CONTROLES ---
+# --- CARGAR CONFIGURACIÓN O INICIALIZAR CONTROLES (PANTALLA DE INICIO COMPLETA) ---
 if os.path.exists(FILE_CONFIG):
     try:
         config = pd.read_csv(FILE_CONFIG).iloc[0].to_dict()
@@ -74,19 +80,19 @@ if os.path.exists(FILE_CONFIG):
         if "meta_dinamica" not in str_app.session_state:
             str_app.session_state.meta_dinamica = int(config["meta"])
         CUENTAS_LISTA = [c.strip() for c in config["cuentas"].split("|")]
-        CATEGORIAS_RELEVANTES = ["VIVIENDA (CUENTAS BASICAS)", "CUOTAS DE COMPRAS", "SERVICIOS PERSONALES"]
         INGRESO_NETO = int(config.get("ingreso_neto", 0))
     except:
-        str_app.error("Error cargando configuración histórica.")
+        str_app.error("ERROR CARGANDO CONFIGURACIÓN HISTÓRICA.")
         str_app.stop()
 else:
     str_app.title(T["config_title"])
     nombre = str_app.text_input(T["name_label"]).upper()
-    ingreso_neto = str_app.number_input("Ingresos Netos Mensuales ($):", min_value=0, step=1000, value=None, placeholder="Ej: 1200000")
-    meta = str_app.number_input(T["meta_label"], min_value=0, step=1000, value=None, placeholder="Ej: 200000")
+    ingreso_neto = str_app.number_input("INGRESOS NETOS MENSUALES ($):", min_value=0, step=1000, value=None, placeholder="EJ: 1200000")
+    meta = str_app.number_input(T["meta_label"], min_value=0, step=1000, value=None, placeholder="EJ: 200000")
     
-    bancos_seleccionados = str_app.multiselect("Selecciona tus bancos e instituciones:", BANCOS_CHILE)
-    cuentas_finales = [f"{b} (Corriente)" for b in bancos_seleccionados] if bancos_seleccionados else ["Mi Cuenta Única"]
+    bancos_seleccionados = str_app.multiselect("SELECCIONA TUS BANCOS E INSTITUCIONES:", BANCOS_CHILE)
+    tipo_cuenta = str_app.radio("TIPO DE CUENTA:", ["CORRIENTE", "VISTA"], horizontal=True)
+    cuentas_finales = [f"{b} ({tipo_cuenta})" for b in bancos_seleccionados] if bancos_seleccionados else [f"MI CUENTA ÚNICA ({tipo_cuenta})"]
 
     if str_app.button("💾 INICIAR SISTEMA", use_container_width=True):
         if nombre and ingreso_neto and ingreso_neto > 0:
@@ -119,30 +125,30 @@ for _, row in df_mov.iterrows():
         total_capital -= m
 
 # --- INTERFAZ CENTRAL ---
-str_app.title(f"💳 Control de Gastos - {USER_NAME}")
+str_app.title(f"💳 CONTROL DE GASTOS - {USER_NAME}")
 str_app.session_state.meta_dinamica = str_app.number_input(T["meta_actual"], value=int(str_app.session_state.meta_dinamica), step=1000)
 
 tabs = str_app.tabs([T["tab_reg"], T["tab_rel"], T["tab_aho"], T["tab_res"], T["tab_ia"]])
 
 # --- 1. PESTAÑA REGISTRO DIARIO ---
 with tabs[0]:
-    str_app.subheader("🖋️ Bitácora de Movimientos del Día")
+    str_app.subheader("🖋️ BITÁCORA DE MOVIMIENTOS DEL DÍA")
     t_op = str_app.radio(T["type_op"], [T["gasto"], T["ingreso"]], horizontal=True)
     f_fec = datetime.now().date()
     
     if t_op == T["gasto"]:
         f_cat = "GASTOS DIARIOS"
-        sub_cat = str_app.selectbox("Tipo de Gasto Diario:", ["TRANSPORTE", "COMIDA", "OTROS"])
+        sub_cat = str_app.selectbox("TIPO DE GASTO DIARIO:", ["TRANSPORTE", "COMIDA", "OTROS"])
     else:
         f_cat = "INGRESO"
         sub_cat = None
 
-    clean_mto = str_app.number_input(T["monto_label"], min_value=0, step=1000, value=None, placeholder="Ej: 15000", key=f"m_{str_app.session_state.get('form_tick', 0)}")
+    clean_mto = str_app.number_input(T["monto_label"], min_value=0, step=1000, value=None, placeholder="EJ: 15000", key=f"m_{str_app.session_state.get('form_tick', 0)}")
     
     if t_op == T["gasto"]:
-        f_des = str_app.text_input(T["desc_label"] + " (Detalle):", key=f"d_{str_app.session_state.get('form_tick', 0)}").upper() if sub_cat == "OTROS" else sub_cat
+        f_des = str_app.text_input(T["desc_label"] + " (DETALLE):", key=f"d_{str_app.session_state.get('form_tick', 0)}").upper() if sub_cat == "OTROS" else sub_cat
     else:
-        f_des = str_app.text_input(T["desc_label"] + " (ej: Sueldo):", key=f"d_{str_app.session_state.get('form_tick', 0)}").upper()
+        f_des = str_app.text_input(T["desc_label"] + " (EJ: SUELDO):", key=f"d_{str_app.session_state.get('form_tick', 0)}").upper()
     
     if str_app.button(T["save_reg"], use_container_width=True):
         if clean_mto and clean_mto > 0 and f_des:
@@ -152,34 +158,42 @@ with tabs[0]:
             str_app.session_state.form_tick = str_app.session_state.get('form_tick', 0) + 1
             str_app.rerun()
 
-# --- 2. PESTAÑA GASTO RELEVANTE ---
+# --- 2. PESTAÑA GASTO RELEVANTE (CON OBLIGATORIEDAD DE VENCIMIENTO Y CUOTAS) ---
 with tabs[1]:
-    str_app.subheader("🔥 Registrar Gasto Relevante")
-    rel_cat = str_app.selectbox("Selecciona Categoría Relevante:", CATEGORIAS_RELEVANTES)
-    rel_nom = str_app.text_input("Nombre / Descripción:", key="rel_nom_input").upper()
-    rel_mto = str_app.number_input("Monto ($):", min_value=0, step=1000, value=None, placeholder="Ej: 80000", key="rel_mto_input")
+    str_app.subheader("🔥 REGISTRAR GASTO RELEVANTE")
+    rel_cat = str_app.selectbox("SELECCIONA CATEGORÍA RELEVANTE:", CATEGORIAS_ESTRICTAS)
+    rel_nom = str_app.text_input("NOMBRE / DESCRIPCIÓN:", key="rel_nom_input").upper()
+    rel_mto = str_app.number_input("MONTO ($):", min_value=0, step=1000, value=None, placeholder="EJ: 80000", key="rel_mto_input")
     
-    rel_tot_cuotas = str_app.number_input("¿En cuántas cuotas?", min_value=1, step=1, value=1) if rel_cat == "CUOTAS DE COMPRAS" else 1
-    rel_venc_check = str_app.checkbox("¿Tiene vencimiento / fecha de pago?", key="rel_venc_check")
-    rel_venc = str_app.date_input("Fecha de Vencimiento", datetime.now().date()) if rel_venc_check else "No"
+    if "2. CUOTAS DE COMPRAS" in rel_cat:
+        col_c1, col_c2 = str_app.columns(2)
+        with col_c1:
+            n_cuota_actual = str_app.number_input("CUOTA ACTUAL:", min_value=1, step=1, value=1)
+        with col_c2:
+            n_cuotas_totales = str_app.number_input("TOTAL CUOTAS:", min_value=1, step=1, value=12)
+    
+    rel_venc = str_app.date_input("FECHA DE VENCIMIENTO OBLIGATORIA:", datetime.now().date())
     
     if str_app.button("💾 GUARDAR GASTO RELEVANTE", use_container_width=True):
         if rel_nom and rel_mto and rel_mto > 0:
-            desc_final_rel = f"{rel_nom} (Cuota 1/{int(rel_tot_cuotas)})" if rel_cat == "CUOTAS DE COMPRAS" else rel_nom
-            if str(rel_venc) != "No":
-                desc_final_rel = f"{desc_final_rel} [Vence: {rel_venc}]"
+            if "2. CUOTAS DE COMPRAS" in rel_cat:
+                desc_final_rel = f"{rel_nom} (CUOTA {int(n_cuota_actual)}/{int(n_cuotas_totales)})"
+            else:
+                desc_final_rel = rel_nom
+                
+            desc_final_rel = f"{desc_final_rel} [VENCE: {rel_venc}]"
                 
             nuevo_rel = pd.DataFrame([[str(datetime.now().date()), "GASTO", cuenta_defecto, rel_cat, desc_final_rel, int(rel_mto)]], columns=df_mov.columns)
             pd.concat([df_mov, nuevo_rel], ignore_index=True).to_csv(FILE_DB, index=False)
             str_app.rerun()
 
-# --- 3. PESTAÑA AHORRO (TRANSACCIONAL PURA: ENTRADAS Y SALIDAS) ---
+# --- 3. PESTAÑA AHORRO (TRANSACCIONAL PURA) ---
 with tabs[2]:
-    str_app.subheader("💰 Registro Transaccional de Fondos de Ahorro")
+    str_app.subheader("💰 REGISTRO TRANSACCIONAL DE FONDOS DE AHORRO")
     
-    tipo_ahorro = str_app.radio("Selecciona Tipo de Transacción de Ahorro:", ["DEPOSITAR EN AHORRO (ENTRA)", "RETIRAR DE AHORRO (SACA)"], horizontal=True)
-    monto_ahorro_trans = str_app.number_input("Monto de la Operación ($):", min_value=0, step=1000, value=None, placeholder="Ej: 50000", key="monto_aho_trans")
-    detalle_ahorro_trans = str_app.text_input("Detalle de la Operación (ej: Fondo Mutuo, Depósito a Plazo):", key="det_aho_trans").upper()
+    tipo_ahorro = str_app.radio("SELECCIONA TIPO DE TRANSACCIÓN DE AHORRO:", ["DEPOSITAR EN AHORRO (ENTRA)", "RETIRAR DE AHORRO (SACA)"], horizontal=True)
+    monto_ahorro_trans = str_app.number_input("MONTO DE LA OPERACIÓN ($):", min_value=0, step=1000, value=None, placeholder="EJ: 50000", key="monto_aho_trans")
+    detalle_ahorro_trans = str_app.text_input("DETALLE DE LA OPERACIÓN (EJ: FONDO MUTUO, DEPÓSITO A PLAZO):", key="det_aho_trans").upper()
     
     if str_app.button("💾 REGISTRAR MOVIMIENTO DE AHORRO", use_container_width=True):
         if monto_ahorro_trans and monto_ahorro_trans > 0 and detalle_ahorro_trans:
@@ -188,7 +202,7 @@ with tabs[2]:
             pd.concat([df_mov, nuevo_aho], ignore_index=True).to_csv(FILE_DB, index=False)
             str_app.rerun()
 
-# --- 4. PESTAÑA RESUMEN (RESTAURADO: CALENDARIO Y DESGLOSE INDIVIDUAL DE GASTOS) ---
+# --- 4. PESTAÑA RESUMEN (DESGLOSE COMPLETO POR LAS 3 CATEGORÍAS + DIARIOS Y CALENDARIO) ---
 with tabs[3]:
     if not df_mov.empty and str_app.button(T["undo_btn"]):
         df_mov = df_mov.iloc[:-1]
@@ -197,8 +211,7 @@ with tabs[3]:
     
     str_app.metric(T["cap_total"], f"${total_capital:,.0f}".replace(",", "."))
     
-    # --- ANÁLISIS ESTRUCTURAL Y DESGLOSE DE GASTOS ---
-    str_app.subheader("📊 Análisis Estructural por Categorías")
+    str_app.subheader("📊 ANÁLISIS ESTRUCTURAL POR CATEGORÍAS")
     
     total_ingresos_mes = df_mov[df_mov["TIPO"] == "INGRESO"]["MONTO"].sum()
     df_gastos = df_mov[df_mov["TIPO"] == "GASTO"].copy()
@@ -206,12 +219,12 @@ with tabs[3]:
     
     str_app.write(f"🟢 **INGRESOS REGISTRADOS:** ${total_ingresos_mes:,.0f}".replace(",", "."))
     
-    # Mapeo exhaustivo para mostrar la suma y el desglose de cada ítem histórico
-    for cat in ["VIVIENDA (CUENTAS BASICAS)", "CUOTAS DE COMPRAS", "SERVICIOS PERSONALES", "GASTOS DIARIOS"]:
+    TODAS_LAS_CATEGORIAS = CATEGORIAS_ESTRICTAS + ["GASTOS DIARIOS"]
+    
+    for cat in TODAS_LAS_CATEGORIAS:
         m = resumen_cat.get(cat, 0) if isinstance(resumen_cat, pd.Series) else 0
         str_app.write(f"🔴 **{cat}:** ${int(m):,.0f}".replace(",", "."))
         
-        # RESTAURADO: Filtrar y desplegar cada gasto individual de esta categoría en el CSV
         df_sub_cat = df_gastos[df_gastos["CATEGORIA"] == cat]
         if not df_sub_cat.empty:
             for _, g_fila in df_sub_cat.iterrows():
@@ -220,14 +233,13 @@ with tabs[3]:
     # --- PROCESAMIENTO MATRICIAL DEL CALENDARIO ---
     str_app.divider()
     hoy = datetime.now()
-    str_app.subheader(f"📅 Calendario de Vencimientos y Operaciones Diarias: {calendar.month_name[hoy.month].upper()} {hoy.year}")
+    str_app.subheader(f"📅 CALENDARIO DE VENCIMIENTOS Y OPERACIONES DIARIAS: {calendar.month_name[hoy.month].upper()} {hoy.year}")
     
     df_mov['FECHA_DT'] = pd.to_datetime(df_mov['FECHA'])
     
     datos_dias = {d: 0 for d in range(1, 32)}
     detalle_dias = {d: [] for d in range(1, 32)}
     
-    # REGLAS 1 Y 2: Solo ingresos y gastos diarios de este mes se muestran en su fecha de registro
     df_mes_ingresados = df_mov[(df_mov['FECHA_DT'].dt.year == hoy.year) & (df_mov['FECHA_DT'].dt.month == hoy.month)]
     for _, fila in df_mes_ingresados.iterrows():
         if fila['CATEGORIA'] == "GASTOS DIARIOS" or fila['TIPO'] == "INGRESO":
@@ -238,11 +250,10 @@ with tabs[3]:
             else:
                 datos_dias[d_real] = 1 if datos_dias[d_real] == 0 else 3
 
-    # REGLA 3: Buscar vencimientos en toda la BD histórica (Ver el día 31 y cualquier otro)
     for _, fila in df_mov.iterrows():
-        if "[Vence: " in str(fila['DESC']):
+        if "[VENCE: " in str(fila['DESC']):
             try:
-                f_venc_str = str(fila['DESC']).split("[Vence: ")[1].replace("]", "").strip()
+                f_venc_str = str(fila['DESC']).split("[VENCE: ")[1].replace("]", "").strip()
                 f_venc_dt = datetime.strptime(f_venc_str, "%Y-%m-%d")
                 if f_venc_dt.year == hoy.year and f_venc_dt.month == hoy.month:
                     d_venc = int(f_venc_dt.day)
@@ -251,14 +262,13 @@ with tabs[3]:
                     datos_dias[d_venc] = 3
             except: pass
 
-    # Creación de la matriz visual del calendario
     cal_obj = calendar.Calendar(firstweekday=6)
     semanas_mes = cal_obj.monthdayscalendar(hoy.year, hoy.month)
     
     matriz_visual = []
     for sem in semanas_mes:
         fila_sem = {}
-        for idx, dia_sem in enumerate(["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"]):
+        for idx, dia_sem in enumerate(["DOM", "LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB"]):
             dia_num = sem[idx]
             if dia_num == 0:
                 fila_sem[dia_sem] = ""
@@ -278,13 +288,12 @@ with tabs[3]:
         selection_mode="single-row"
     )
     
-    str_app.caption("Leyenda: ⚪ Sin compromisos | 🔴 Gastos Diarios | 🟢 Ingresos | 🟡 Alertas o Vencimientos")
+    str_app.caption("LEYENDA: ⚪ SIN COMPROMISOS | 🔴 GASTOS DIARIOS | 🟢 INGRESOS | 🟡 ALERTAS O VENCIMIENTOS")
 
-    # --- PANEL DE DETALLE AUTOMÁTICO AL DAR CLIC ---
     filas_seleccionadas = seleccion_interactiva.get("selection", {}).get("rows", [])
     
     str_app.divider()
-    str_app.subheader("📋 Panel de Detalle Automatizado")
+    str_app.subheader("📋 PANEL DE DETALLE AUTOMATIZADO")
     
     if filas_seleccionadas:
         indice_semana = filas_seleccionadas[0]
@@ -292,41 +301,41 @@ with tabs[3]:
         dias_con_datos = [int(d) for d in semana_elegida if d != 0 and len(detalle_dias[int(d)]) > 0]
         
         if dias_con_datos:
-            pestanas_dias = str_app.tabs([f"Día {d}" for d in dias_con_datos])
+            pestanas_dias = str_app.tabs([f"DÍA {d}" for d in dias_con_datos])
             for i, d_activo in enumerate(dias_con_datos):
                 with pestanas_dias[i]:
-                    str_app.write(f"### 📑 Bitácora Completa del Día {d_activo}")
+                    str_app.write(f"### 📑 BITÁCORA COMPLETA DEL DÍA {d_activo}")
                     for item in detalle_dias[d_activo]:
                         str_app.markdown(f"* {item}")
         else:
-            str_app.info("La semana seleccionada no registra gastos diarios, ingresos ni vencimientos agendados.")
+            str_app.info("LA SEMANA SELECCIONADA NO REGISTRA GASTOS DIARIOS, INGRESOS NI VENCIMIENTOS AGENDADOS.")
     else:
-        str_app.warning("Selecciona haciendo clic arriba en cualquier fila del calendario para cargar dinámicamente el desglose de los días.")
+        str_app.warning("SELECCIONA HACIENDO CLIC ARRIBA EN CUALQUIER FILA DEL CALENDARIO PARA CARGAR DINÁMICAMENTE EL DESGLOSE DE LOS DÍAS.")
 
 # --- 5. PESTAÑA IA ---
 with tabs[4]:
-    str_app.subheader("🕵️ Chat Interactivo con el Analista IA")
+    str_app.subheader("🕵️ CHAT INTERACTIVO CON EL ANALISTA IA")
     api_key = str_app.secrets.get("GROQ_API_KEY")
     
     if api_key:
         client = Groq(api_key=api_key)
         
-        user_query = str_app.text_input("Hazle una pregunta a la IA sobre tu estado financiero o movimientos:", key="ia_chat_query").upper()
+        user_query = str_app.text_input("HAZLE UNA PREGUNTA A LA IA SOBRE TU ESTADO FINANCIERO O MOVIMIENTOS:", key="ia_chat_query").upper()
         
         if str_app.button("✨ CONSULTAR AL ANALISTA", use_container_width=True):
             if user_query:
-                contexto_datos = f"Datos actuales del sistema -> Capital Total: {total_capital}. Resumen movimientos: {str(df_mov[['FECHA', 'TIPO', 'CATEGORIA', 'DESC', 'MONTO']].tail(20).to_dict(orient='records'))}"
+                contexto_datos = f"DATOS ACTUALES DEL SISTEMA -> CAPITAL TOTAL: {total_capital}. RESUMEN MOVIMIENTOS: {str(df_mov[['FECHA', 'TIPO', 'CATEGORIA', 'DESC', 'MONTO']].tail(20).to_dict(orient='records'))}"
                 
-                with str_app.spinner("Analizando información..."):
+                with str_app.spinner("ANALIZANDO INFORMACIÓN..."):
                     chat = client.chat.completions.create(
                         messages=[
-                            {"role": "system", "content": "Eres un asistente y analista financiero experto para Chile. Responde de forma concisa y directa, siempre en mayúsculas."},
-                            {"role": "user", "content": f"Contexto financiero: {contexto_datos}. Pregunta del usuario: {user_query}"}
+                            {"role": "system", "content": "ERES UN ASISTENTE Y ANALISTA FINANCIERO EXPERTO PARA CHILE. RESPONDE DE FORMA CONCISA Y DIRECTA, SIEMPRE EN MAYÚSCULAS."},
+                            {"role": "user", "content": f"CONTEXTO FINANCIERO: {contexto_datos}. PREGUNTA DEL USUARIO: {user_query}"}
                         ],
                         model="llama-3.1-8b-instant"
                     )
                 str_app.success(chat.choices[0].message.content)
             else:
-                str_app.warning("Por favor escribe una pregunta antes de consultar.")
+                str_app.warning("POR FAVOR ESCRIBE UNA PREGUNTA ANTES DE CONSULTAR.")
     else:
-        str_app.error("No se detectó la clave de API (GROQ_API_KEY) en los secretos de Streamlit.")
+        str_app.error("NO SE DETECTÓ LA CLAVE DE API (GROQ_API_KEY) EN LOS SECRETOS DE STREAMLIT.")
