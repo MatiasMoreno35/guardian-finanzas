@@ -55,6 +55,9 @@ TEXTS = {
 if "idioma" not in str_app.session_state:
     str_app.session_state.idioma = "es"
 
+# --- RESTAURADO: SELECTOR DE IDIOMAS EN LA BARRA LATERAL ---
+str_app.sidebar.title("🌐 Idioma / Language")
+str_app.session_state.idioma = str_app.sidebar.selectbox("Seleccione Idioma:", ["es"], index=0)
 T = TEXTS[str_app.session_state.idioma]
 
 # --- BOTÓN DE REINICIAR ---
@@ -161,52 +164,57 @@ with tabs[1]:
             pd.concat([df_mov, nuevo_rel], ignore_index=True).to_csv(FILE_DB, index=False)
             str_app.rerun()
 
-# --- 3. PESTAÑA RESUMEN (CON CALENDARIO MATRICIAL INTEGRADO) ---
+# --- 3. PESTAÑA RESUMEN (CALENDARIO + PROGRESO DE AHORRO RESTAURADO) ---
 with tabs[2]:
     if not df_mov.empty and str_app.button(T["undo_btn"]):
         df_mov[:-1].to_csv(FILE_DB, index=False); str_app.rerun()
     
     str_app.metric(T["cap_total"], f"${total_capital:,.0f}".replace(",", "."))
     
-    # --- BARRA DE PROGRESO DE AHORRO ---
-    str_app.subheader("Ahorro Real Mensual")
+    # --- RESTAURADO: BARRA DE PROGRESO DE AHORRO DEL MES ---
+    str_app.subheader("🎯 Progreso de Ahorro del Mes")
     monto_ahorrado = max(0, total_ingresos - total_gastos)
     meta_establecida = str_app.session_state.meta_dinamica if str_app.session_state.meta_dinamica > 0 else 1
-    str_app.progress(min(monto_ahorrado / meta_establecida, 1.0))
+    porcentaje_ahorro = min(monto_ahorrado / meta_establecida, 1.0)
     
-    # --- ANÁLISIS ESTRUCTURAL ---
+    col_ah1, col_ah2 = str_app.columns([3, 1])
+    col_ah1.write(f"Ahorro Real Actual: **${monto_ahorrado:,.0f}** de una meta de **${meta_establecida:,.0f}**".replace(",", "."))
+    col_ah2.write(f"**{porcentaje_ahorro * 100:.1f}%**")
+    str_app.progress(porcentaje_ahorro)
+    
+    # --- ANÁLISIS ESTRUCTURAL POR CATEGORÍAS ---
+    str_app.divider()
+    str_app.subheader("📊 Análisis Estructural")
     df_gastos = df_mov[df_mov["TIPO"] == "GASTO"].copy()
     resumen_cat = df_gastos.groupby("CATEGORIA")["MONTO"].sum() if not df_gastos.empty else {}
     
-    str_app.write(f"🟢 **INGRESOS:** ${total_ingresos:,.0f}".replace(",", "."))
+    str_app.write(f"🟢 **INGRESOS (ENTRADAS DE PLATA):** ${total_ingresos:,.0f}".replace(",", "."))
     for cat in ["VIVIENDA (CUENTAS BASICAS)", "CUOTAS DE COMPRAS", "SERVICIOS PERSONALES", "GASTOS DIARIOS"]:
         m = resumen_cat.get(cat, 0) if isinstance(resumen_cat, pd.Series) else 0
         str_app.write(f"🔴 **{cat}:** ${int(m):,.0f}".replace(",", "."))
 
-    # --- PROCESAMIENTO DEL CALENDARIO CUADRADO ---
+    # --- PROCESAMIENTO MATRICIAL DEL CALENDARIO ---
     str_app.divider()
     hoy = datetime.now()
-    str_app.subheader(f"📅 Calendario del Mes: {calendar.month_name[hoy.month].upper()} {hoy.year}")
+    str_app.subheader(f"📅 Calendario de Vencimientos y Operaciones Diarias: {calendar.month_name[hoy.month].upper()} {hoy.year}")
+    str_app.info("💡 Haz clic en cualquier semana del calendario para desplegar los detalles abajo automáticamente.")
     
-    # Mapear los datos de la DB
     df_mov['FECHA_DT'] = pd.to_datetime(df_mov['FECHA'])
-    df_mes = df_mov[(df_mov['FECHA_DT'].dt.year == hoy.year) & (df_mov['FECHA_DT'].dt.month == hoy.month)]
     
-    # Clasificación diaria para pintar la matriz
-    # 0 = Vacío, 1 = Solo Gasto, 2 = Solo Ingreso, 3 = Ambos / Vencimientos
     datos_dias = {d: 0 for d in range(1, 32)}
     detalle_dias = {d: [] for d in range(1, 32)}
     
-    # Buscar registros ingresados el día o vencimientos que caen este mes
-    for _, fila in df_mes.iterrows():
-        d_ingreso = fila['FECHA_DT'].day
-        detalle_dias[d_ingreso].append(f"{'🟢' if fila['TIPO']=='INGRESO' else '🔴'} ${int(fila['MONTO']):,} - {fila['DESC']}")
-        if fila['TIPO'] == 'INGRESO':
-            datos_dias[d_ingreso] = 2 if datos_dias[d_ingreso] == 0 else 3
-        else:
-            datos_dias[d_ingreso] = 1 if datos_dias[d_ingreso] == 0 else 3
+    # Reglas de Mapeo del Calendario
+    df_mes_ingresados = df_mov[(df_mov['FECHA_DT'].dt.year == hoy.year) & (df_mov['FECHA_DT'].dt.month == hoy.month)]
+    for _, fila in df_mes_ingresados.iterrows():
+        if fila['CATEGORIA'] == "GASTOS DIARIOS" or fila['TIPO'] == "INGRESO":
+            d_real = fila['FECHA_DT'].day
+            detalle_dias[d_real].append(f"{'🟢 INGRESO' if fila['TIPO']=='INGRESO' else '🔴 GASTO DIARIO'} - {fila['DESC']}: ${int(fila['MONTO']):,}")
+            if fila['TIPO'] == 'INGRESO':
+                datos_dias[d_real] = 2 if datos_dias[d_real] == 0 else 3
+            else:
+                datos_dias[d_real] = 1 if datos_dias[d_real] == 0 else 3
 
-    # Buscar si en la descripción hay un vencimiento explícito para marcarlo [Vence: YYYY-MM-DD]
     for _, fila in df_mov.iterrows():
         if "[Vence: " in str(fila['DESC']):
             try:
@@ -214,11 +222,12 @@ with tabs[2]:
                 f_venc_dt = datetime.strptime(f_venc_str, "%Y-%m-%d")
                 if f_venc_dt.year == hoy.year and f_venc_dt.month == hoy.month:
                     d_venc = f_venc_dt.day
-                    datos_dias[d_venc] = 3  # Forzar alerta amarilla/vencimiento
-                    detalle_dias[d_venc].append(f"⚠️ VENCIMIENTO: {fila['DESC'].split(' [')[0]} (${int(fila['MONTO']):,})")
+                    limpio_desc = fila['DESC'].split(" [")[0]
+                    detalle_dias[d_venc].append(f"⚠️ VENCIMIENTO ({fila['CATEGORIA']}) - {limpio_desc}: ${int(fila['MONTO']):,}")
+                    datos_dias[d_venc] = 3
             except: pass
 
-    # Construcción de la matriz visual cuadrada estándar de calendario
+    # Creación de la matriz visual del calendario
     cal_obj = calendar.Calendar(firstweekday=6)
     semanas_mes = cal_obj.monthdayscalendar(hoy.year, hoy.month)
     
@@ -237,21 +246,38 @@ with tabs[2]:
         
     df_cal_visual = pd.DataFrame(matriz_visual)
     
-    # Renderizado estético del cuadro
-    str_app.dataframe(df_cal_visual, use_container_width=True, hide_index=True)
-    str_app.caption("Leyenda: ⚪ Sin movimientos | 🔴 Solo Gastos | 🟢 Solo Ingresos | 🟡 Mix del Día o Vencimientos Fijos")
+    seleccion_interactiva = str_app.dataframe(
+        df_cal_visual, 
+        use_container_width=True, 
+        hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row"
+    )
     
-    # --- VENTANA EMERGENTE DETALLADA AL SELECCIONAR DÍA ---
-    dia_elegido = str_app.number_input("🔎 Selecciona un día para ver el detalle:", min_value=1, max_value=len(datos_dias), value=hoy.day)
+    str_app.caption("Leyenda: ⚪ Sin compromisos | 🔴 Gastos Diarios | 🟢 Ingresos | 🟡 Alertas o Vencimientos")
+
+    # --- PANEL DE DETALLE AUTOMÁTICO AL DAR CLIC ---
+    filas_seleccionadas = seleccion_interactiva.get("selection", {}).get("rows", [])
     
-    with str_app.popover(f"📋 Ver detalles del Día {dia_elegido}", use_container_width=True):
-        str_app.write(f"### Historial Técnico - Día {dia_elegido}")
-        items = detalle_dias.get(dia_elegido, [])
-        if items:
-            for item in items:
-                str_app.markdown(f"* {item}")
+    str_app.divider()
+    str_app.subheader("📋 Panel de Detalle Automatizado")
+    
+    if filas_seleccionadas:
+        indice_semana = filas_seleccionadas[0]
+        semana_elegida = semanas_mes[indice_semana]
+        dias_con_datos = [d for d in semana_elegida if d != 0 and len(detalle_dias[d]) > 0]
+        
+        if dias_con_datos:
+            pestanas_dias = str_app.tabs([f"Día {d}" for d in dias_con_datos])
+            for i, d_activo in enumerate(dias_con_datos):
+                with pestanas_dias[i]:
+                    str_app.write(f"### 📑 Bitácora Completa del Día {d_activo}")
+                    for item in detalle_dias[d_activo]:
+                        str_app.markdown(f"* {item}")
         else:
-            str_app.info("No hay registros ni compromisos agendados para esta fecha.")
+            str_app.info("La semana seleccionada no registra gastos diarios, ingresos ni vencimientos agendados.")
+    else:
+        str_app.warning("Selecciona haciendo clic arriba en cualquier fila del calendario para cargar dinámicamente el desglose de los días.")
 
 # --- 4. PESTAÑA IA ---
 with tabs[3]:
