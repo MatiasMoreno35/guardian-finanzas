@@ -38,7 +38,7 @@ CATEGORIAS_ESTRICTAS = [
 # --- TRADUCCIONES ---
 TEXTS = {
     "es": {
-        "config_title": "🚀 CONFIGURACIÓN INICIAL",
+        "config_title": "🚀 CONFIGURACIÓN INICIAL DEL SISTEMA",
         "name_label": "¿CÓMO TE LLAMAS?",
         "meta_label": "META DE AHORRO MENSUAL ($)",
         "meta_actual": "🎯 META DE AHORRO ACTUAL:",
@@ -72,7 +72,7 @@ if str_app.sidebar.button(T["reset_btn"], use_container_width=True):
     for key in list(str_app.session_state.keys()): del str_app.session_state[key]
     str_app.rerun()
 
-# --- CARGAR CONFIGURACIÓN O INICIALIZAR CONTROLES (PANTALLA DE INICIO COMPLETA) ---
+# --- CARGAR CONFIGURACIÓN O INICIALIZAR CONTROLES (CON ENTRADA E INCLUSIÓN DE GASTOS INICIALES) ---
 if os.path.exists(FILE_CONFIG):
     try:
         config = pd.read_csv(FILE_CONFIG).iloc[0].to_dict()
@@ -86,19 +86,67 @@ if os.path.exists(FILE_CONFIG):
         str_app.stop()
 else:
     str_app.title(T["config_title"])
+    
+    # 1. DATOS DE IDENTIFICACIÓN Y PRESUPUESTO
     nombre = str_app.text_input(T["name_label"]).upper()
     ingreso_neto = str_app.number_input("INGRESOS NETOS MENSUALES ($):", min_value=0, step=1000, value=None, placeholder="EJ: 1200000")
     meta = str_app.number_input(T["meta_label"], min_value=0, step=1000, value=None, placeholder="EJ: 200000")
     
+    # 2. CONFIGURACIÓN DE BANCOS Y TIPO DE CUENTA
     bancos_seleccionados = str_app.multiselect("SELECCIONA TUS BANCOS E INSTITUCIONES:", BANCOS_CHILE)
     tipo_cuenta = str_app.radio("TIPO DE CUENTA:", ["CORRIENTE", "VISTA"], horizontal=True)
     cuentas_finales = [f"{b} ({tipo_cuenta})" for b in bancos_seleccionados] if bancos_seleccionados else [f"MI CUENTA ÚNICA ({tipo_cuenta})"]
+    cuenta_inicial_defecto = cuentas_finales[0]
 
-    if str_app.button("💾 INICIAR SISTEMA", use_container_width=True):
+    str_app.divider()
+    
+    # 3. CARGA E INCLUSIÓN OBLIGATORIA DE GASTOS FIJOS/RELEVANTES EN LA CONFIGURACIÓN INICIAL
+    str_app.subheader("🔥 INCLUSIÓN DE GASTOS ESTRUCTURALES INICIALES")
+    
+    str_app.markdown("### 🏠 1. GASTOS DE VIVIENDA (CUENTAS BÁSICAS)")
+    v_desc = str_app.text_input("DESCRIPCIÓN VIVIENDA (EJ: ARRIENDO, LUZ, AGUA):", key="init_v_desc").upper()
+    v_monto = str_app.number_input("MONTO VIVIENDA ($):", min_value=0, step=1000, key="init_v_monto")
+    v_venc = str_app.date_input("FECHA DE VENCIMIENTO VIVIENDA:", datetime.now().date(), key="init_v_venc")
+
+    str_app.markdown("### 💳 2. CUOTAS DE COMPRAS")
+    c_desc = str_app.text_input("DESCRIPCIÓN COMPRA (EJ: REFRIGERADOR, AVION):", key="init_c_desc").upper()
+    c_monto = str_app.number_input("MONTO CUOTA ($):", min_value=0, step=1000, key="init_c_monto")
+    col_i1, col_i2 = str_app.columns(2)
+    with col_i1:
+        c_act = str_app.number_input("CUOTA ACTUAL:", min_value=1, step=1, value=1, key="init_c_act")
+    with col_i2:
+        c_tot = str_app.number_input("TOTAL CUOTAS:", min_value=1, step=1, value=12, key="init_c_tot")
+    c_venc = str_app.date_input("FECHA DE VENCIMIENTO CUOTA:", datetime.now().date(), key="init_c_venc")
+
+    str_app.markdown("### 👤 3. SERVICIOS PERSONALES")
+    p_desc = str_app.text_input("DESCRIPCIÓN SERVICIO PERSONAL (EJ: ISAPRE, GIMNASIO):", key="init_p_desc").upper()
+    p_monto = str_app.number_input("MONTO PERSONAL ($):", min_value=0, step=1000, key="init_p_monto")
+    p_venc = str_app.date_input("FECHA DE VENCIMIENTO PERSONAL:", datetime.now().date(), key="init_p_venc")
+
+    if str_app.button("💾 INICIAR SISTEMA Y CARGAR GASTOS", use_container_width=True):
         if nombre and ingreso_neto and ingreso_neto > 0:
+            # Guardar la configuración base del usuario
             pd.DataFrame([{"nombre": nombre, "ingreso_neto": int(ingreso_neto), "meta": int(meta if meta else 0), "cuentas": " | ".join(cuentas_finales)}]).to_csv(FILE_CONFIG, index=False)
-            if not os.path.exists(FILE_DB):
-                pd.DataFrame(columns=['FECHA', 'TIPO', 'CUENTA', 'CATEGORIA', 'DESC', 'MONTO']).to_csv(FILE_DB, index=False)
+            
+            # Preparar dataframe base de movimientos
+            df_inicial = pd.DataFrame(columns=['FECHA', 'TIPO', 'CUENTA', 'CATEGORIA', 'DESC', 'MONTO'])
+            nuevos_registros = []
+            fecha_hoy_str = str(datetime.now().date())
+
+            # Inyectar obligatoriamente los 3 tipos de gastos si tienen monto definido
+            if v_monto > 0 and v_desc:
+                nuevos_registros.append([fecha_hoy_str, "GASTO", cuenta_inicial_defecto, "1. VIVIENDA (CUENTAS BASICAS)", f"{v_desc} [VENCE: {v_venc}]", int(v_monto)])
+            
+            if c_monto > 0 and c_desc:
+                nuevos_registros.append([fecha_hoy_str, "GASTO", cuenta_inicial_defecto, "2. CUOTAS DE COMPRAS", f"{c_desc} (CUOTA {int(c_act)}/{int(c_tot)}) [VENCE: {c_venc}]", int(c_monto)])
+                
+            if p_monto > 0 and p_desc:
+                nuevos_registros.append([fecha_hoy_str, "GASTO", cuenta_inicial_defecto, "3. SERVICIOS PERSONALES", f"{p_desc} [VENCE: {p_venc}]", int(p_monto)])
+
+            if nuevos_registros:
+                df_inicial = pd.concat([df_inicial, pd.DataFrame(nuevos_registros, columns=df_inicial.columns)], ignore_index=True)
+                
+            df_inicial.to_csv(FILE_DB, index=False)
             str_app.rerun()
     str_app.stop()
 
@@ -158,9 +206,9 @@ with tabs[0]:
             str_app.session_state.form_tick = str_app.session_state.get('form_tick', 0) + 1
             str_app.rerun()
 
-# --- 2. PESTAÑA GASTO RELEVANTE (CON OBLIGATORIEDAD DE VENCIMIENTO Y CUOTAS) ---
+# --- 2. PESTAÑA GASTO RELEVANTE ---
 with tabs[1]:
-    str_app.subheader("🔥 REGISTRAR GASTO RELEVANTE")
+    str_app.subheader("🔥 REGISTRAR GASTO RELEVANTE EXTRA")
     rel_cat = str_app.selectbox("SELECCIONA CATEGORÍA RELEVANTE:", CATEGORIAS_ESTRICTAS)
     rel_nom = str_app.text_input("NOMBRE / DESCRIPCIÓN:", key="rel_nom_input").upper()
     rel_mto = str_app.number_input("MONTO ($):", min_value=0, step=1000, value=None, placeholder="EJ: 80000", key="rel_mto_input")
@@ -187,7 +235,7 @@ with tabs[1]:
             pd.concat([df_mov, nuevo_rel], ignore_index=True).to_csv(FILE_DB, index=False)
             str_app.rerun()
 
-# --- 3. PESTAÑA AHORRO (TRANSACCIONAL PURA) ---
+# --- 3. PESTAÑA AHORRO ---
 with tabs[2]:
     str_app.subheader("💰 REGISTRO TRANSACCIONAL DE FONDOS DE AHORRO")
     
@@ -202,7 +250,7 @@ with tabs[2]:
             pd.concat([df_mov, nuevo_aho], ignore_index=True).to_csv(FILE_DB, index=False)
             str_app.rerun()
 
-# --- 4. PESTAÑA RESUMEN (DESGLOSE COMPLETO POR LAS 3 CATEGORÍAS + DIARIOS Y CALENDARIO) ---
+# --- 4. PESTAÑA RESUMEN (CALENDARIO Y DESGLOSE COMPLETO) ---
 with tabs[3]:
     if not df_mov.empty and str_app.button(T["undo_btn"]):
         df_mov = df_mov.iloc[:-1]
