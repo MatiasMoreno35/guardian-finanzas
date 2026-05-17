@@ -126,7 +126,7 @@ else:
             tipo_cta = str_app.selectbox(f"Tipo para {bco}:", ["Vista", "Corriente"], key=f"tipo_{bco}")
             cuentas_finales.append(f"{bco} ({tipo_cta})")
 
-    str_app.divider()
+    st_divider = str_app.divider()
     
     # --- 1. VIVIENDA (CUENTAS BÁSICAS) ---
     str_app.subheader("1. VIVIENDA (CUENTAS BASICAS)")
@@ -144,7 +144,7 @@ else:
                 str_app.rerun()
                 
     if str_app.session_state.lista_vivienda:
-        str_app.dataframe(pd.DataFrame(st.session_state.lista_vivienda), use_container_width=True)
+        str_app.dataframe(pd.DataFrame(str_app.session_state.lista_vivienda), use_container_width=True)
 
     # --- 2. CUOTAS DE COMPRAS ---
     str_app.subheader("2. CUOTAS DE COMPRAS")
@@ -152,16 +152,12 @@ else:
         str_app.write("**Nuevo Gasto de Cuotas**")
         c_nom = str_app.text_input("Nombre del gasto (ej: Casa Comercial, Crédito):", key=f"c_nom_{str_app.session_state.tick_cuo}").upper()
         c_mto = str_app.number_input("Monto de la Cuota ($):", min_value=0, step=1000, value=None, placeholder="Ej: 45000", key=f"c_mto_{str_app.session_state.tick_cuo}")
-        
-        # --- NUEVO CONTADOR DE CUOTAS INTEGRADO ---
         c_tot_cuotas = str_app.number_input("¿En cuántas cuotas?", min_value=1, step=1, value=1, key=f"c_tot_{str_app.session_state.tick_cuo}")
-        
         c_venc_check = str_app.checkbox("¿Tiene vencimiento?", key=f"c_vc_{str_app.session_state.tick_cuo}")
         c_venc = str_app.date_input("Fecha de Vencimiento", datetime.now().date(), key=f"c_fec_{str_app.session_state.tick_cuo}") if c_venc_check else "No"
         
         if str_app.button("Confirmar Gasto Cuota"):
             if c_nom and c_mto and c_mto > 0:
-                # Estructuramos la descripción para guardar la cuota inicial (Cuota 1/X)
                 desc_con_cuota = f"{c_nom} (Cuota 1/{int(c_tot_cuotas)})"
                 str_app.session_state.lista_cuotas.append({"desc": desc_con_cuota, "monto": int(c_mto), "venc": str(c_venc)})
                 str_app.session_state.tick_cuo += 1
@@ -243,7 +239,7 @@ total_capital = sum(saldos[c] for c in CUENTAS_LISTA)
 # --- INTERFAZ CENTRAL ---
 str_app.title(f"💳 Control de Gastos - {USER_NAME}")
 
-st.session_state.meta_dinamica = str_app.number_input(T["meta_actual"], value=int(str_app.session_state.meta_dinamica), step=1000)
+str_app.session_state.meta_dinamica = str_app.number_input(T["meta_actual"], value=int(str_app.session_state.meta_dinamica), step=1000)
 
 tabs = str_app.tabs([T["tab_reg"], T["tab_res"], T["tab_ia"]])
 
@@ -300,7 +296,7 @@ with tabs[1]:
     else:
         str_app.info("Aún no hay gastos registrados para analizar.")
 
-    st.divider()
+    str_app.divider()
     str_app.dataframe(df_mov.sort_values(by="FECHA", ascending=False), use_container_width=True)
 
 # --- PESTAÑA IA ---
