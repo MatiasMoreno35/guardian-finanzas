@@ -52,15 +52,15 @@ TEXTS = {
         "save_config": "Guardar Configuración",
         "meta_actual": "🎯 Meta de Ahorro Actual:",
         "reset_btn": "🚨 Reiniciar Sistema",
-        "tab_reg": "📝 REGISTRO",
+        "tab_reg": "📝 REGISTRO DIARIO",
+        "tab_rel": "🔥 GASTO RELEVANTE",
         "tab_res": "📊 RESUMEN",
         "tab_ia": "🕵️ ANALISTA IA",
-        "type_op": "Tipo",
+        "type_op": "Tipo de Movimiento",
         "gasto": "GASTO",
         "ingreso": "INGRESO",
-        "cat_label": "Categoría",
         "monto_label": "Monto ($)",
-        "desc_label": "Descripción",
+        "desc_label": "Descripción / Detalle",
         "save_reg": "💾 GUARDAR REGISTRO",
         "undo_btn": "🔙 DESHACER ÚLTIMO REGISTRO",
         "cap_total": "CAPITAL TOTAL DISPONIBLE",
@@ -91,7 +91,7 @@ if os.path.exists(FILE_CONFIG):
         if "meta_dinamica" not in str_app.session_state:
             str_app.session_state.meta_dinamica = int(config["meta"])
         CUENTAS_LISTA = [c.strip() for c in config["cuentas"].split("|")]
-        CATEGORIAS_SISTEMA = ["VIVIENDA (CUENTAS BASICAS)", "CUOTAS DE COMPRAS", "SERVICIOS PERSONALES", "GASTOS DIARIOS"]
+        CATEGORIAS_RELEVANTES = ["VIVIENDA (CUENTAS BASICAS)", "CUOTAS DE COMPRAS", "SERVICIOS PERSONALES"]
         INGRESO_NETO = int(config.get("ingreso_neto", 0))
     except:
         str_app.error("Error cargando config.")
@@ -126,7 +126,7 @@ else:
             tipo_cta = str_app.selectbox(f"Tipo para {bco}:", ["Vista", "Corriente"], key=f"tipo_{bco}")
             cuentas_finales.append(f"{bco} ({tipo_cta})")
 
-    st_divider = str_app.divider()
+    str_app.divider()
     
     # --- 1. VIVIENDA (CUENTAS BÁSICAS) ---
     str_app.subheader("1. VIVIENDA (CUENTAS BASICAS)")
@@ -226,59 +226,96 @@ if not os.path.exists(FILE_DB):
 df_mov = pd.read_csv(FILE_DB)
 
 # --- CÁLCULOS DE SALDOS ---
-saldos = {cta: 0 for cta in CUENTAS_LISTA}
+# Mantenemos la lógica interna indexada para el pozo común sin preguntarle al usuario
+cuenta_defecto = CUENTAS_LISTA[0]
+total_capital = 0
 for _, row in df_mov.iterrows():
     try:
         m = int(row['MONTO'])
-        tipo, cta = row['TIPO'], row['CUENTA']
-        if tipo == "INGRESO" and cta in saldos: saldos[cta] += m
-        elif tipo == "GASTO" and cta in saldos: saldos[cta] -= m
+        tipo = row['TIPO']
+        if tipo == "INGRESO": total_capital += m
+        elif tipo == "GASTO": total_capital -= m
     except: continue
-total_capital = sum(saldos[c] for c in CUENTAS_LISTA)
 
 # --- INTERFAZ CENTRAL ---
 str_app.title(f"💳 Control de Gastos - {USER_NAME}")
 
 str_app.session_state.meta_dinamica = str_app.number_input(T["meta_actual"], value=int(str_app.session_state.meta_dinamica), step=1000)
 
-tabs = str_app.tabs([T["tab_reg"], T["tab_res"], T["tab_ia"]])
+tabs = str_app.tabs([T["tab_reg"], T["tab_rel"], T["tab_res"], T["tab_ia"]])
 
-# --- PESTAÑA REGISTRO ---
+# --- 1. PESTAÑA REGISTRO DIARIO (GASTO DIARIO / INGRESO) ---
 with tabs[0]:
-    str_app.subheader("🖋️ Registrar Movimiento del Día")
+    str_app.subheader("🖋️ Bitácora de Movimientos del Día")
     t_op = str_app.radio(T["type_op"], [T["gasto"], T["ingreso"]], horizontal=True)
-    c1, c2 = str_app.columns(2)
+    
+    f_fec = datetime.now().date()
+    
     if t_op == T["gasto"]:
-        f_cat = c1.selectbox(T["cat_label"], CATEGORIAS_SISTEMA, index=3)
-        f_cta = c2.selectbox("Pagar desde (Cuenta)", CUENTAS_LISTA)
-        f_fec = datetime.now().date()
+        f_cat = "GASTOS DIARIOS"
+        sub_cat = str_app.selectbox("Tipo de Gasto Diario:", ["TRANSPORTE", "COMIDA", "OTROS"])
     else:
-        f_cta = c1.selectbox("Destino (Cuenta)", CUENTAS_LISTA)
         f_cat = "INGRESO"
-        f_fec = datetime.now().date()
-        
+        sub_cat = None
+
     clean_mto = str_app.number_input(T["monto_label"], min_value=0, step=1000, value=None, placeholder="Ej: 15000", key=f"m_{str_app.session_state.get('form_tick', 0)}")
-    f_des = str_app.text_input(T["desc_label"], key=f"d_{str_app.session_state.get('form_tick', 0)}").upper()
+    
+    # Manejo de la descripción adaptiva
+    if t_op == T["gasto"]:
+        if sub_cat == "OTROS":
+            f_des = str_app.text_input(T["desc_label"] + " (Especifica qué compraste):", key=f"d_{str_app.session_state.get('form_tick', 0)}").upper()
+        else:
+            f_des = sub_cat  # Se guarda directamente TRANSPORTE o COMIDA
+    else:
+        f_des = str_app.text_input(T["desc_label"] + " (ej: Sueldo, Transferencia):", key=f"d_{str_app.session_state.get('form_tick', 0)}").upper()
     
     if str_app.button(T["save_reg"], use_container_width=True):
         if clean_mto and clean_mto > 0 and f_des:
             m_tipo = "GASTO" if t_op == T["gasto"] else "INGRESO"
-            nuevo = pd.DataFrame([[str(f_fec), m_tipo, f_cta, f_cat, f_des, int(clean_mto)]], columns=df_mov.columns)
+            nuevo = pd.DataFrame([[str(f_fec), m_tipo, cuenta_defecto, f_cat, f_des, int(clean_mto)]], columns=df_mov.columns)
             pd.concat([df_mov, nuevo], ignore_index=True).to_csv(FILE_DB, index=False)
             str_app.session_state.form_tick = str_app.session_state.get('form_tick', 0) + 1
             str_app.rerun()
 
-# --- PESTAÑA RESUMEN ---
+# --- 2. NUEVA PESTAÑA: GASTO RELEVANTE ---
 with tabs[1]:
+    str_app.subheader("🔥 Registrar un Compromiso o Gasto Relevante")
+    str_app.write("Registra aquí los gastos estructurales o de gran relevancia.")
+    
+    rel_cat = str_app.selectbox("Selecciona Categoría Relevante:", CATEGORIAS_RELEVANTES)
+    rel_nom = str_app.text_input("Nombre / Descripción del Gasto Relevante:", key="rel_nom_input").upper()
+    rel_mto = str_app.number_input("Monto de la Cuota o Gasto ($):", min_value=0, step=1000, value=None, placeholder="Ej: 80000", key="rel_mto_input")
+    
+    # Si es cuota, habilitamos el contador dinámico que creamos anteriormente
+    if rel_cat == "CUOTAS DE COMPRAS":
+        rel_tot_cuotas = str_app.number_input("¿En cuántas cuotas?", min_value=1, step=1, value=1, key="rel_cuotas_input")
+    else:
+        rel_tot_cuotas = 1
+        
+    rel_venc_check = str_app.checkbox("¿Tiene vencimiento / fecha de pago?", key="rel_venc_check")
+    rel_venc = str_app.date_input("Fecha de Vencimiento", datetime.now().date(), key="rel_fec_input") if rel_venc_check else "No"
+    
+    if str_app.button("💾 GUARDAR GASTO RELEVANTE", use_container_width=True):
+        if rel_nom and rel_mto and rel_mto > 0:
+            f_fec_rel = str(datetime.now().date())
+            desc_final_rel = rel_nom
+            if rel_cat == "CUOTAS DE COMPRAS":
+                desc_final_rel = f"{rel_nom} (Cuota 1/{int(rel_tot_cuotas)})"
+            
+            if str(rel_venc) != "No":
+                desc_final_rel = f"{desc_final_rel} [Vence: {rel_venc}]"
+                
+            nuevo_rel = pd.DataFrame([[f_fec_rel, "GASTO", cuenta_defecto, rel_cat, desc_final_rel, int(rel_mto)]], columns=df_mov.columns)
+            pd.concat([df_mov, nuevo_rel], ignore_index=True).to_csv(FILE_DB, index=False)
+            str_app.success(f"Gasto relevante '{rel_nom}' ingresado con éxito.")
+            str_app.rerun()
+
+# --- 3. PESTAÑA RESUMEN ---
+with tabs[2]:
     if not df_mov.empty and str_app.button(T["undo_btn"]):
         df_mov[:-1].to_csv(FILE_DB, index=False); str_app.rerun()
     
     str_app.metric(T["cap_total"], f"${total_capital:,.0f}".replace(",", "."))
-    
-    str_app.write("**Saldos de cuentas actuales:**")
-    columnas_ctas = str_app.columns(len(CUENTAS_LISTA))
-    for i, cta in enumerate(CUENTAS_LISTA):
-        columnas_ctas[i].metric(cta, f"${saldos[cta]:,.0f}".replace(",", "."))
     
     str_app.divider()
     str_app.subheader("📊 Análisis por Categoría")
@@ -286,8 +323,9 @@ with tabs[1]:
     df_gastos = df_mov[df_mov["TIPO"] == "GASTO"].copy()
     if not df_gastos.empty:
         resumen_cat = df_gastos.groupby("CATEGORIA")["MONTO"].sum()
+        TODAS_CATEGORIAS = ["VIVIENDA (CUENTAS BASICAS)", "CUOTAS DE COMPRAS", "SERVICIOS PERSONALES", "GASTOS DIARIOS"]
         
-        for cat in CATEGORIAS_SISTEMA:
+        for cat in TODAS_CATEGORIAS:
             monto = resumen_cat.get(cat, 0)
             col_c, col_m = str_app.columns([3, 1])
             col_c.write(f"**{cat}**")
@@ -299,8 +337,8 @@ with tabs[1]:
     str_app.divider()
     str_app.dataframe(df_mov.sort_values(by="FECHA", ascending=False), use_container_width=True)
 
-# --- PESTAÑA IA ---
-with tabs[2]:
+# --- 4. PESTAÑA IA ---
+with tabs[3]:
     api_key = str_app.secrets.get("GROQ_API_KEY")
     if api_key:
         client = Groq(api_key=api_key)
