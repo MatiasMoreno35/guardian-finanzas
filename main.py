@@ -165,19 +165,38 @@ with tabs[1]:
             pd.concat([df_mov, nuevo_rel], ignore_index=True).to_csv(FILE_DB, index=False)
             str_app.rerun()
 
-# --- 3. PESTAÑA AHORRO (MÓDULO INDEPENDIENTE) ---
+# --- 3. PESTAÑA AHORRO (DISEÑO AVANZADO RESTAURADO) ---
 with tabs[2]:
-    str_app.subheader("🎯 Progreso de Ahorro del Mes")
+    str_app.subheader("📊 Panel Avanzado de Capacidad de Ahorro")
+    
     monto_ahorrado = max(0, total_ingresos - total_gastos)
     meta_establecida = str_app.session_state.meta_dinamica if str_app.session_state.meta_dinamica > 0 else 1
     porcentaje_ahorro = min(monto_ahorrado / meta_establecida, 1.0)
     
-    col_ah1, col_ah2 = str_app.columns([3, 1])
-    col_ah1.write(f"Ahorro Real Actual: **${monto_ahorrado:,.0f}** de una meta de **${meta_establecida:,.0f}**".replace(",", "."))
-    col_ah2.write(f"**{porcentaje_ahorro * 100:.1f}%**")
+    # Bloques métricos organizados en columnas para balance visual
+    m_col1, m_col2, m_col3 = str_app.columns(3)
+    m_col1.metric("Ingresos Totales del Mes", f"${total_ingresos:,.0f}".replace(",", "."))
+    m_col2.metric("Gastos Totales Ejecutados", f"${total_gastos:,.0f}".replace(",", "."))
+    m_col3.metric("Saldo Líquido Disponible", f"${total_ingresos - total_gastos:,.0f}".replace(",", "."), delta=f"${monto_ahorrado:,.0f}".replace(",", "."))
+    
+    str_app.divider()
+    
+    # Barra de progreso de la meta con porcentajes dinámicos
+    str_app.write(f"🎯 **Progreso Operativo:** Has acumulado **${monto_ahorrado:,.0f}** de tu meta de **${meta_establecida:,.0f}**")
     str_app.progress(porcentaje_ahorro)
+    
+    col_pct1, col_pct2 = str_app.columns([3, 1])
+    col_pct2.write(f"### **{porcentaje_ahorro * 100:.1f}% Completado**")
+    
+    # Contenedores dinámicos de feedback según rendimiento
+    if porcentaje_ahorro >= 1.0:
+        str_app.success("🎉 ¡Excelente! Has alcanzado o superado el 100% de tu meta de ahorro mensual establecida.")
+    elif porcentaje_ahorro >= 0.5:
+        str_app.info("👍 Buen camino. Has superado el 50% de tu meta. Mantén el control de los gastos diarios para cerrar el mes en verde.")
+    else:
+        str_app.warning("⚠️ Atención: Tu capacidad de ahorro real está por debajo del 50% de la meta configurada. Revisa los gastos relevantes pendientes.")
 
-# --- 4. PESTAÑA RESUMEN (CALENDARIO CORREGIDO) ---
+# --- 4. PESTAÑA RESUMEN (CALENDARIO EXHAUSTIVO) ---
 with tabs[3]:
     if not df_mov.empty and str_app.button(T["undo_btn"]):
         df_mov[:-1].to_csv(FILE_DB, index=False); str_app.rerun()
@@ -209,21 +228,21 @@ with tabs[3]:
     df_mes_ingresados = df_mov[(df_mov['FECHA_DT'].dt.year == hoy.year) & (df_mov['FECHA_DT'].dt.month == hoy.month)]
     for _, fila in df_mes_ingresados.iterrows():
         if fila['CATEGORIA'] == "GASTOS DIARIOS" or fila['TIPO'] == "INGRESO":
-            d_real = fila['FECHA_DT'].day
+            d_real = int(fila['FECHA_DT'].day)
             detalle_dias[d_real].append(f"{'🟢 INGRESO' if fila['TIPO']=='INGRESO' else '🔴 GASTO DIARIO'} - {fila['DESC']}: ${int(fila['MONTO']):,}")
             if fila['TIPO'] == 'INGRESO':
                 datos_dias[d_real] = 2 if datos_dias[d_real] == 0 else 3
             else:
                 datos_dias[d_real] = 1 if datos_dias[d_real] == 0 else 3
 
-    # REGLA 3: Buscar vencimientos en toda la BD histórica para agendarlos exclusivamente en su día de vencimiento de este mes
+    # REGLA 3: Mapeo de vencimientos históricos transversales con tipado numérico estricto (Corrige errores con días límite como el 31)
     for _, fila in df_mov.iterrows():
         if "[Vence: " in str(fila['DESC']):
             try:
                 f_venc_str = str(fila['DESC']).split("[Vence: ")[1].replace("]", "").strip()
                 f_venc_dt = datetime.strptime(f_venc_str, "%Y-%m-%d")
                 if f_venc_dt.year == hoy.year and f_venc_dt.month == hoy.month:
-                    d_venc = f_venc_dt.day
+                    d_venc = int(f_venc_dt.day)
                     limpio_desc = fila['DESC'].split(" [")[0]
                     detalle_dias[d_venc].append(f"⚠️ VENCIMIENTO ({fila['CATEGORIA']}) - {limpio_desc}: ${int(fila['MONTO']):,}")
                     datos_dias[d_venc] = 3
@@ -241,7 +260,7 @@ with tabs[3]:
             if dia_num == 0:
                 fila_sem[dia_sem] = ""
             else:
-                status = datos_dias.get(dia_num, 0)
+                status = datos_dias.get(int(dia_num), 0)
                 marca = "⚪" if status == 0 else ("🔴" if status == 1 else ("🟢" if status == 2 else "🟡"))
                 fila_sem[dia_sem] = f"{dia_num} {marca}"
         matriz_visual.append(fila_sem)
@@ -258,7 +277,7 @@ with tabs[3]:
     
     str_app.caption("Leyenda: ⚪ Sin compromisos | 🔴 Gastos Diarios | 🟢 Ingresos | 🟡 Alertas o Vencimientos")
 
-    # --- PANEL DE DETALLE AUTOMÁTICO AL DAR CLIC ---
+    # --- PANEL DE DETALLE AUTOMÁTICO AL DAR CLIC (Compatibilidad de índices asegurada) ---
     filas_seleccionadas = seleccion_interactiva.get("selection", {}).get("rows", [])
     
     str_app.divider()
@@ -267,7 +286,7 @@ with tabs[3]:
     if filas_seleccionadas:
         indice_semana = filas_seleccionadas[0]
         semana_elegida = semanas_mes[indice_semana]
-        dias_con_datos = [d for d in semana_elegida if d != 0 and len(detalle_dias[d]) > 0]
+        dias_con_datos = [int(d) for d in semana_elegida if d != 0 and len(detalle_dias[int(d)]) > 0]
         
         if dias_con_datos:
             pestanas_dias = str_app.tabs([f"Día {d}" for d in dias_con_datos])
