@@ -5,7 +5,7 @@ import os
 from groq import Groq
 
 # --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="Control de Gastos", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Smart Wallet", page_icon="💰", layout="wide")
 
 # --- LÓGICA DE RUTAS Y MULTIUSUARIO ---
 user_id = st.query_params.get("user", "comun")
@@ -43,31 +43,41 @@ BANCOS_CHILE = [
     "045 - China Construction Bank"
 ]
 
-# --- TEXTOS TRADUCCIONES ---
+# --- TRADUCCIONES ---
 TEXTS = {
     "es": {
         "config_title": "🚀 Configuración Inicial",
         "name_label": "¿Cómo te llamas?",
-        "meta_label": "Meta de ahorro mensual ($)",
-        "save_config": "Guardar Configuración Inicial",
+        "meta_label": "Meta de ahorro mensual",
+        "save_config": "Guardar Configuración",
+        "meta_actual": "🎯 Meta de Ahorro Actual:",
         "reset_btn": "🚨 Reiniciar Sistema",
-        "tab_reg": "📝 BITÁCORA DIARIA (REGISTRO)",
-        "tab_res": "📊 RESUMEN Y ANÁLISIS",
+        "tab_reg": "📝 REGISTRO",
+        "tab_aho": "🏦 AHORROS",
+        "tab_res": "📊 RESUMEN",
         "tab_ia": "🕵️ ANALISTA IA",
-        "type_op": "Tipo de Operación",
+        "type_op": "Tipo",
         "gasto": "GASTO",
         "ingreso": "INGRESO",
-        "cat_label": "Categoría del Gasto",
-        "monto_label": "Monto $ (Pesos Chilenos sin puntos)",
-        "desc_label": "Descripción / Detalle del movimiento",
-        "save_reg": "💾 GUARDAR EN BITÁCORA",
+        "cat_label": "Categoría",
+        "monto_label": "Monto $",
+        "desc_label": "Descripción",
+        "save_reg": "💾 GUARDAR REGISTRO",
         "undo_btn": "🔙 DESHACER ÚLTIMO REGISTRO",
-        "cap_total": "CAPITAL TOTAL EN CUENTAS",
+        "cap_total": "CAPITAL TOTAL DISPONIBLE",
+        "aho_saldo": "SALDO EN AHORRO",
     }
 }
-T = TEXTS["es"]
 
-# --- BOTÓN DE REINICIAR / BORRAR (Barra Lateral) ---
+# --- CONTROL DE IDIOMA EN LA BARRA LATERAL ---
+if "idioma" not in st.session_state:
+    st.session_state.idioma = "es"
+
+st.sidebar.title("🌐 Idioma / Language")
+st.session_state.idioma = st.sidebar.selectbox("Seleccione Idioma:", ["es"], index=0)
+T = TEXTS[st.session_state.idioma]
+
+# --- BOTÓN DE REINICIAR / BORRAR ---
 st.sidebar.title("🛠️ Administración")
 if st.sidebar.button(T["reset_btn"], use_container_width=True):
     if os.path.exists(FILE_CONFIG): os.remove(FILE_CONFIG)
@@ -81,15 +91,13 @@ if os.path.exists(FILE_CONFIG):
     try:
         config = pd.read_csv(FILE_CONFIG).iloc[0].to_dict()
         USER_NAME = config["nombre"]
-        INGRESO_NETO = int(config.get("ingreso_neto", 0))
-        
         if "meta_dinamica" not in st.session_state:
             st.session_state.meta_dinamica = float(config["meta"])
-            
         CUENTAS_LISTA = [c.strip() for c in config["cuentas"].split("|")]
         CATEGORIAS_SISTEMA = ["VIVIENDA (CUENTAS BASICAS)", "CUOTAS DE COMPRAS", "SERVICIOS PERSONALES", "GASTOS DIARIOS"]
+        INGRESO_NETO = int(config.get("ingreso_neto", 0))
     except:
-        st.error("Error cargando la configuración.")
+        st.error("Error cargando config.")
         if st.button("Reconfigurar"): 
             if os.path.exists(FILE_CONFIG): os.remove(FILE_CONFIG)
             st.rerun()
@@ -98,87 +106,115 @@ else:
     st.title(T["config_title"])
     st.write("Configura tu perfil de control de gastos en Pesos Chilenos (valores sin decimales).")
     
-    if "filas_vivienda" not in st.session_state: st.session_state.filas_vivienda = 1
-    if "filas_cuotas" not in st.session_state: st.session_state.filas_cuotas = 1
-    if "filas_servicios" not in st.session_state: st.session_state.filas_servicios = 1
+    # Inicialización de listas en session_state para los modales/popovers de gastos iniciales
+    if "lista_vivienda" not in st.session_state: st.session_state.lista_vivienda = []
+    if "lista_cuotas" not in st.session_state: st.session_state.lista_cuotas = []
+    if "lista_servicios" not in st.session_state: st.session_state.lista_servicios = []
 
-    with st.form("config_form"):
-        nombre = st.text_input(T["name_label"]).upper()
-        ingreso_neto = st.number_input("Ingresos Netos Mensuales ($):", min_value=0, step=10000, value=0)
-        meta = st.number_input(T["meta_label"], min_value=0, step=10000, value=0)
-        
-        st.subheader("🏦 Cuentas Bancarias")
-        bancos_seleccionados = st.multiselect("Selecciona tus bancos e instituciones:", BANCOS_CHILE)
-        
-        tipos_cuentas = {}
-        if bancos_seleccionados:
-            st.write("*Define el tipo de cuenta para cada institución seleccionada:*")
-            for bco in bancos_seleccionados:
-                tipos_cuentas[bco] = st.selectbox(f"Tipo para {bco}:", ["Vista", "Corriente"], key=f"tipo_{bco}")
-        
-        st.divider()
-        st.subheader("1. VIVIENDA (CUENTAS BÁSICAS)")
-        gastos_vivienda_items = []
-        for i in range(st.session_state.filas_vivienda):
-            c1, c2 = st.columns([2, 1])
-            n_g = c1.text_input(f"Descripción Gasto {i+1} (ej: Arriendo, Luz)", key=f"viv_n_{i}").upper()
-            m_g = c2.number_input(f"Monto $", min_value=0, step=1000, key=f"viv_m_{i}", value=0)
-            if n_g and m_g > 0: gastos_vivienda_items.append((n_g, m_g))
+    nombre = st.text_input(T["name_label"]).upper()
+    ingreso_neto = st.number_input("Ingresos Netos Mensuales ($):", min_value=0, step=10000, value=0)
+    meta = st.number_input(T["meta_label"], value=0.0, step=10000.0)
+    
+    st.subheader("🏦 Cuentas Bancarias")
+    bancos_seleccionados = st.multiselect("Selecciona tus bancos e instituciones:", BANCOS_CHILE)
+    
+    # Discriminación inmediata de cuentas (Vista/Corriente) al ser seleccionadas
+    cuentas_finales = []
+    if bancos_seleccionados:
+        st.write("*Define el tipo de cuenta para cada institución seleccionada:*")
+        for bco in bancos_seleccionados:
+            tipo_cta = st.selectbox(f"Tipo para {bco}:", ["Vista", "Corriente"], key=f"tipo_{bco}")
+            cuentas_finales.append(f"{bco} ({tipo_cta})")
+
+    st.divider()
+    
+    # --- 1. VIVIENDA (CUENTAS BÁSICAS) ---
+    st.subheader("1. VIVIENDA (CUENTAS BASICAS)")
+    with st.popover("➕ Agregar gasto"):
+        st.write("**Nuevo Gasto de Vivienda / Básica**")
+        v_nom = st.text_input("Nombre del gasto (ej: Arriendo, Luz):", key="v_nom_pop").upper()
+        v_mto = st.number_input("Monto $:", min_value=0, step=1000, key="v_mto_pop")
+        v_venc_check = st.checkbox("¿Tiene vencimiento?", key="v_vc_pop")
+        v_venc = st.date_input("Fecha de Vencimiento", datetime.now().date(), key="v_fec_pop") if v_venc_check else "No"
+        if st.button("Confirmar Gasto Vivienda"):
+            if v_nom and v_mto > 0:
+                st.session_state.lista_vivienda.append({"desc": v_nom, "monto": int(v_mto), "venc": str(v_venc)})
+                st.rerun()
+    if st.session_state.lista_vivienda:
+        st.dataframe(pd.DataFrame(st.session_state.lista_vivienda), use_container_width=True)
+
+    # --- 2. CUOTAS DE COMPRAS ---
+    st.subheader("2. CUOTAS DE COMPRAS")
+    with st.popover("➕ Agregar gasto"):
+        st.write("**Nuevo Gasto de Cuotas**")
+        c_nom = st.text_input("Nombre del gasto (ej: Tarjeta CMR, Crédito):", key="c_nom_pop").upper()
+        c_mto = st.number_input("Monto $:", min_value=0, step=1000, key="c_mto_pop")
+        c_venc_check = st.checkbox("¿Tiene vencimiento?", key="c_vc_pop")
+        c_venc = st.date_input("Fecha de Vencimiento", datetime.now().date(), key="c_fec_pop") if c_venc_check else "No"
+        if st.button("Confirmar Gasto Cuota"):
+            if c_nom and c_mto > 0:
+                st.session_state.lista_cuotas.append({"desc": c_nom, "monto": int(c_mto), "venc": str(c_venc)})
+                st.rerun()
+    if st.session_state.lista_cuotas:
+        st.dataframe(pd.DataFrame(st.session_state.lista_cuotas), use_container_width=True)
+
+    # --- 3. SERVICIOS PERSONALES ---
+    st.subheader("3. SERVICIOS PERSONALES")
+    with st.popover("➕ Agregar gasto"):
+        st.write("**Nuevo Servicio Personal**")
+        s_nom = st.text_input("Nombre del gasto (ej: Netflix, Gimnasio):", key="s_nom_pop").upper()
+        s_mto = st.number_input("Monto $:", min_value=0, step=1000, key="s_mto_pop")
+        s_venc_check = st.checkbox("¿Tiene vencimiento?", key="s_vc_pop")
+        s_venc = st.date_input("Fecha de Vencimiento", datetime.now().date(), key="s_fec_pop") if s_venc_check else "No"
+        if st.button("Confirmar Gasto Servicio"):
+            if s_nom and s_mto > 0:
+                st.session_state.lista_servicios.append({"desc": s_nom, "monto": int(s_mto), "venc": str(s_venc)})
+                st.rerun()
+    if st.session_state.lista_servicios:
+        st.dataframe(pd.DataFrame(st.session_state.lista_servicios), use_container_width=True)
+
+    st.divider()
+    
+    # Botón final para consolidar el setup completo
+    if st.button("💾 GUARDAR TODO E INICIAR SISTEMA", use_container_width=True):
+        if nombre and ingreso_neto > 0 and cuentas_finales:
+            string_cuentas = " | ".join(cuentas_finales)
             
-        st.subheader("2. CUOTAS DE COMPRAS")
-        gastos_cuotas_items = []
-        for i in range(st.session_state.filas_cuotas):
-            c1, c2 = st.columns([2, 1])
-            n_g = c1.text_input(f"Descripción Gasto {i+1} (ej: Tarjeta CMR, Crédito)", key=f"cuo_n_{i}").upper()
-            m_g = c2.number_input(f"Monto $", min_value=0, step=1000, key=f"cuo_m_{i}", value=0)
-            if n_g and m_g > 0: gastos_cuotas_items.append((n_g, m_g))
-
-        st.subheader("3. SERVICIOS PERSONALES")
-        gastos_servicios_items = []
-        for i in range(st.session_state.filas_servicios):
-            c1, c2 = st.columns([2, 1])
-            n_g = c1.text_input(f"Descripción Gasto {i+1} (ej: Netflix, Gimnasio)", key=f"ser_n_{i}").upper()
-            m_g = c2.number_input(f"Monto $", min_value=0, step=1000, key=f"ser_m_{i}", value=0)
-            if n_g and m_g > 0: gastos_servicios_items.append((n_g, m_g))
-
-        st.write("💡 *Si necesitas agregar más filas de gastos a los bloques, usa los botones de abajo antes de guardar.*")
-        guardar_todo = st.form_submit_button(T["save_config"])
-        
-    c_b1, c_b2, c_b3 = st.columns(3)
-    if c_b1.button("➕ Más filas en Vivienda"): st.session_state.filas_vivienda += 1; st.rerun()
-    if c_b2.button("➕ Más filas en Cuotas"): st.session_state.filas_cuotas += 1; st.rerun()
-    if c_b3.button("➕ Más filas en Servicios"): st.session_state.filas_servicios += 1; st.rerun()
-
-    if guardar_todo:
-        if nombre and ingreso_neto > 0 and bancos_seleccionados:
-            cuentas_procesadas = [f"{bco} ({tipos_cuentas[bco]})" for bco in bancos_seleccionados]
-            string_cuentas = " | ".join(cuentas_procesadas)
-            
+            # Guardar configuraciones maestras
             pd.DataFrame([{
                 "nombre": nombre, 
                 "ingreso_neto": int(ingreso_neto),
-                "meta": int(meta), 
-                "cuentas": string_cuentas
+                "meta": float(meta), 
+                "cuentas": string_cuentas,
+                "idioma": "es"
             }]).to_csv(FILE_CONFIG, index=False)
             
+            # Construir la base de datos con los gastos precargados
             registros_iniciales = []
             fecha_hoy = str(datetime.now().date())
             
-            for n, m in gastos_vivienda_items:
-                registros_iniciales.append([fecha_hoy, "GASTO", cuentas_procesadas[0], "VIVIENDA (CUENTAS BASICAS)", n, int(m)])
-            for n, m in gastos_cuotas_items:
-                registros_iniciales.append([fecha_hoy, "GASTO", cuentas_procesadas[0], "CUOTAS DE COMPRAS", n, int(m)])
-            for n, m in gastos_servicios_items:
-                registros_iniciales.append([fecha_hoy, "GASTO", cuentas_procesadas[0], "SERVICIOS PERSONALES", n, int(m)])
+            for item in st.session_state.lista_vivienda:
+                desc_final = f"{item['desc']} (Vence: {item['venc']})" if item['venc'] != "No" else item['desc']
+                registros_iniciales.append([fecha_hoy, "GASTO", cuentas_finales[0], "VIVIENDA (CUENTAS BASICAS)", desc_final, item['monto']])
+                
+            for item in st.session_state.lista_cuotas:
+                desc_final = f"{item['desc']} (Vence: {item['venc']})" if item['venc'] != "No" else item['desc']
+                registros_iniciales.append([fecha_hoy, "GASTO", cuentas_finales[0], "CUOTAS DE COMPRAS", desc_final, item['monto']])
+                
+            for item in st.session_state.lista_servicios:
+                desc_final = f"{item['desc']} (Vence: {item['venc']})" if item['venc'] != "No" else item['desc']
+                registros_iniciales.append([fecha_hoy, "GASTO", cuentas_finales[0], "SERVICIOS PERSONALES", desc_final, item['monto']])
                 
             df_inicial = pd.DataFrame(registros_iniciales, columns=['FECHA', 'TIPO', 'CUENTA', 'CATEGORIA', 'DESC', 'MONTO'])
             df_inicial.to_csv(FILE_DB, index=False)
             st.rerun()
         else:
-            st.error("Por favor completa los datos básicos (Nombre, Ingreso) y selecciona al menos una cuenta bancaria.")
+            st.error("Asegúrate de llenar el Nombre, Ingresos y tener al menos un Banco con su tipo seleccionado.")
     st.stop()
 
-# --- CARGAR BASE DE DATOS TRAS EL SETUP ---
+# --- OPERACIONES DE BASE DE DATOS ---
+if not os.path.exists(FILE_DB):
+    pd.DataFrame(columns=['FECHA', 'TIPO', 'CUENTA', 'CATEGORIA', 'DESC', 'MONTO']).to_csv(FILE_DB, index=False)
 df_mov = pd.read_csv(FILE_DB)
 
 # --- CÁLCULOS DE SALDOS ---
@@ -192,24 +228,22 @@ for _, row in df_mov.iterrows():
     except: continue
 total_capital = sum(saldos[c] for c in CUENTAS_LISTA)
 
-# --- INTERFAZ PANEL DE CONTROL ---
-st.title(f"📊 Control de Gastos - Perfil: {USER_NAME}")
-st.session_state.meta_dinamica = st.number_input("🎯 Meta de Ahorro Actual:", value=st.session_state.meta_dinamica, step=10000.0)
+# --- INTERFAZ CENTRAL ---
+st.title(f"💳 Control de Gastos - {USER_NAME}")
+st.session_state.meta_dinamica = st.number_input(T["meta_actual"], value=st.session_state.meta_dinamica, step=10000.0)
 
 tabs = st.tabs([T["tab_reg"], T["tab_res"], T["tab_ia"]])
 
-# --- PESTAÑA 1: BITÁCORA DIARIA (REGISTRO) ---
+# --- PESTAÑA REGISTRO (CON GASTOS DIARIOS POR DEFECTO) ---
 with tabs[0]:
-    st.subheader("🖋️ Registrar Movimiento del Día")
     t_op = st.radio(T["type_op"], [T["gasto"], T["ingreso"]], horizontal=True)
     c1, c2 = st.columns(2)
-    
     if t_op == T["gasto"]:
-        f_cat = c1.selectbox(T["cat_label"], CATEGORIAS_SISTEMA, index=3) # GASTOS DIARIOS por defecto
-        f_cta = c2.selectbox("Pagar desde Cuenta", CUENTAS_LISTA)
+        f_cat = c1.selectbox(T["cat_label"], CATEGORIAS_SISTEMA, index=3) # GASTOS DIARIOS por defecto en Bitácora
+        f_cta = c2.selectbox("Pagar desde (Cuenta)", CUENTAS_LISTA)
         f_fec = datetime.now().date()
     else:
-        f_cta = c1.selectbox("Destino del Ingreso", CUENTAS_LISTA)
+        f_cta = c1.selectbox("Destino (Cuenta)", CUENTAS_LISTA)
         f_cat = "INGRESO"
         f_fec = datetime.now().date()
         
@@ -225,44 +259,38 @@ with tabs[0]:
             st.session_state.form_tick = st.session_state.get('form_tick', 0) + 1
             st.rerun()
 
-# --- PESTAÑA 2: RESUMEN Y ANÁLISIS ---
+# --- PESTAÑA RESUMEN ---
 with tabs[1]:
     if not df_mov.empty and st.button(T["undo_btn"]):
         df_mov[:-1].to_csv(FILE_DB, index=False); st.rerun()
-        
+    
     st.metric(T["cap_total"], f"${total_capital:,.0f}".replace(",", "."))
     
-    st.write("**Saldos por Cuenta Declarada:**")
-    cc = st.columns(len(CUENTAS_LISTA))
-    for idx, cta in enumerate(CUENTAS_LISTA):
-        cc[idx].metric(cta, f"${saldos[cta]:,.0f}".replace(",", "."))
-        
+    st.write("**Saldos de cuentas actuales:**")
+    columnas_ctas = st.columns(len(CUENTAS_LISTA))
+    for i, cta in enumerate(CUENTAS_LISTA):
+        columnas_ctas[i].metric(cta, f"${saldos[cta]:,.0f}".replace(",", "."))
+    
     st.divider()
-    st.subheader("🎯 Resumen de Gastos por Categorías Fijas")
+    st.subheader("📊 Análisis por Categoría")
     
     df_gastos = df_mov[df_mov["TIPO"] == "GASTO"].copy()
     if not df_gastos.empty:
         resumen_cat = df_gastos.groupby("CATEGORIA")["MONTO"].sum()
         
-        col_graf1, col_graf2 = st.columns(2)
-        with col_graf1:
-            st.write("**Consumo Actual por Categoría:**")
-            for cat in CATEGORIAS_SISTEMA:
-                monto = resumen_cat.get(cat, 0)
-                st.write(f"**{cat}:** ${int(monto):,.0f}".replace(",", "."))
-                st.progress(min(monto / (df_gastos["MONTO"].sum() if df_gastos["MONTO"].sum() > 0 else 1), 1.0))
-        with col_graf2:
-            st.write("**Análisis de Límites:**")
-            st.write(f"Tu ingreso mensual de referencia es: **${INGRESO_NETO:,.0f}**".replace(",", "."))
-            st.write(f"Tu meta de ahorro mensual establecida es: **${st.session_state.meta_dinamica:,.0f}**".replace(",", "."))
+        for cat in CATEGORIAS_SISTEMA:
+            monto = resumen_cat.get(cat, 0)
+            col_c, col_m = st.columns([3, 1])
+            col_c.write(f"**{cat}**")
+            col_m.write(f"${int(monto):,.0f}".replace(",", "."))
+            st.progress(min(monto / (df_gastos["MONTO"].sum() if df_gastos["MONTO"].sum() > 0 else 1), 1.0))
     else:
-        st.info("Aún no se registran gastos en el historial.")
+        st.info("Aún no hay gastos registrados para analizar.")
 
     st.divider()
-    st.write("**Historial Completo de Movimientos (Bitácora):**")
     st.dataframe(df_mov.sort_values(by="FECHA", ascending=False), use_container_width=True)
 
-# --- PESTAÑA 3: ANALISTA IA ---
+# --- PESTAÑA IA ---
 with tabs[2]:
     api_key = st.secrets.get("GROQ_API_KEY")
     if api_key:
@@ -276,7 +304,7 @@ with tabs[2]:
         if st.button("✨ GENERAR CONSEJO PROACTIVO"):
             ctx = f"Usuario: {USER_NAME}. Capital: {total_capital}. Ingreso: {INGRESO_NETO}. Meta: {st.session_state.meta_dinamica}. Gastos por categoría: {gastos_texto}"
             chat = client.chat.completions.create(
-                messages=[{"role": "system", "content": "Eres un analista financiero. Analiza los gastos y da un consejo breve basado en los parámetros de control de gastos. Sé breve y directo."},
+                messages=[{"role": "system", "content": "Eres un analista financiero. Analiza los gastos y da un consejo específico para alcanzar la meta de ahorro. Sé breve y directo."},
                           {"role": "user", "content": ctx}],
                 model="llama-3.1-8b-instant")
             st.success(chat.choices[0].message.content)
