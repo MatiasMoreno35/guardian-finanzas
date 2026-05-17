@@ -56,7 +56,7 @@ TEXTS = {
 if "idioma" not in str_app.session_state:
     str_app.session_state.idioma = "es"
 
-# --- RESTAURADO: SELECTOR DE IDIOMAS EN LA BARRA LATERAL ---
+# --- SELECTOR DE IDIOMAS EN LA BARRA LATERAL ---
 str_app.sidebar.title("🌐 Idioma / Language")
 str_app.session_state.idioma = str_app.sidebar.selectbox("Seleccione Idioma:", ["es"], index=0)
 T = TEXTS[str_app.session_state.idioma]
@@ -156,7 +156,7 @@ with tabs[1]:
     rel_venc = str_app.date_input("Fecha de Vencimiento", datetime.now().date()) if rel_venc_check else "No"
     
     if str_app.button("💾 GUARDAR GASTO RELEVANTE", use_container_width=True):
-        if rel_nom pinned and rel_mto and rel_mto > 0:
+        if rel_nom and rel_mto and rel_mto > 0:
             desc_final_rel = f"{rel_nom} (Cuota 1/{int(rel_tot_cuotas)})" if rel_cat == "CUOTAS DE COMPRAS" else rel_nom
             if str(rel_venc) != "No":
                 desc_final_rel = f"{desc_final_rel} [Vence: {rel_venc}]"
@@ -165,7 +165,7 @@ with tabs[1]:
             pd.concat([df_mov, nuevo_rel], ignore_index=True).to_csv(FILE_DB, index=False)
             str_app.rerun()
 
-# --- 3. PESTAÑA AHORRO (MÓDULO INDEPENDIENTE RE-ESTABLECIDO) ---
+# --- 3. PESTAÑA AHORRO (MÓDULO INDEPENDIENTE) ---
 with tabs[2]:
     str_app.subheader("🎯 Progreso de Ahorro del Mes")
     monto_ahorrado = max(0, total_ingresos - total_gastos)
@@ -216,13 +216,12 @@ with tabs[3]:
             else:
                 datos_dias[d_real] = 1 if datos_dias[d_real] == 0 else 3
 
-    # REGLA 3 CORREGIDA: Buscar vencimientos en toda la BD histórica para agendarlos exclusivamente en su día de vencimiento de este mes
+    # REGLA 3: Buscar vencimientos en toda la BD histórica para agendarlos exclusivamente en su día de vencimiento de este mes
     for _, fila in df_mov.iterrows():
         if "[Vence: " in str(fila['DESC']):
             try:
                 f_venc_str = str(fila['DESC']).split("[Vence: ")[1].replace("]", "").strip()
                 f_venc_dt = datetime.strptime(f_venc_str, "%Y-%m-%d")
-                # Validar que el vencimiento corresponda al mes y año actual en pantalla
                 if f_venc_dt.year == hoy.year and f_venc_dt.month == hoy.month:
                     d_venc = f_venc_dt.day
                     limpio_desc = fila['DESC'].split(" [")[0]
