@@ -39,6 +39,7 @@ TEXTS = {
         "reset_btn": "🚨 Reiniciar Sistema",
         "tab_reg": "📝 REGISTRO DIARIO",
         "tab_rel": "🔥 GASTO RELEVANTE",
+        "tab_aho": "🎯 AHORRO",
         "tab_res": "📊 RESUMEN",
         "tab_ia": "🕵️ ANALISTA IA",
         "type_op": "Tipo de Movimiento",
@@ -113,7 +114,7 @@ for _, row in df_mov.iterrows():
 str_app.title(f"💳 Control de Gastos - {USER_NAME}")
 str_app.session_state.meta_dinamica = str_app.number_input(T["meta_actual"], value=int(str_app.session_state.meta_dinamica), step=1000)
 
-tabs = str_app.tabs([T["tab_reg"], T["tab_rel"], T["tab_res"], T["tab_ia"]])
+tabs = str_app.tabs([T["tab_reg"], T["tab_rel"], T["tab_aho"], T["tab_res"], T["tab_ia"]])
 
 # --- 1. PESTAÑA REGISTRO DIARIO ---
 with tabs[0]:
@@ -155,7 +156,7 @@ with tabs[1]:
     rel_venc = str_app.date_input("Fecha de Vencimiento", datetime.now().date()) if rel_venc_check else "No"
     
     if str_app.button("💾 GUARDAR GASTO RELEVANTE", use_container_width=True):
-        if rel_nom and rel_mto and rel_mto > 0:
+        if rel_nom pinned and rel_mto and rel_mto > 0:
             desc_final_rel = f"{rel_nom} (Cuota 1/{int(rel_tot_cuotas)})" if rel_cat == "CUOTAS DE COMPRAS" else rel_nom
             if str(rel_venc) != "No":
                 desc_final_rel = f"{desc_final_rel} [Vence: {rel_venc}]"
@@ -164,14 +165,8 @@ with tabs[1]:
             pd.concat([df_mov, nuevo_rel], ignore_index=True).to_csv(FILE_DB, index=False)
             str_app.rerun()
 
-# --- 3. PESTAÑA RESUMEN (CALENDARIO + PROGRESO DE AHORRO RESTAURADO) ---
+# --- 3. PESTAÑA AHORRO (MÓDULO INDEPENDIENTE RE-ESTABLECIDO) ---
 with tabs[2]:
-    if not df_mov.empty and str_app.button(T["undo_btn"]):
-        df_mov[:-1].to_csv(FILE_DB, index=False); str_app.rerun()
-    
-    str_app.metric(T["cap_total"], f"${total_capital:,.0f}".replace(",", "."))
-    
-    # --- RESTAURADO: BARRA DE PROGRESO DE AHORRO DEL MES ---
     str_app.subheader("🎯 Progreso de Ahorro del Mes")
     monto_ahorrado = max(0, total_ingresos - total_gastos)
     meta_establecida = str_app.session_state.meta_dinamica if str_app.session_state.meta_dinamica > 0 else 1
@@ -181,9 +176,15 @@ with tabs[2]:
     col_ah1.write(f"Ahorro Real Actual: **${monto_ahorrado:,.0f}** de una meta de **${meta_establecida:,.0f}**".replace(",", "."))
     col_ah2.write(f"**{porcentaje_ahorro * 100:.1f}%**")
     str_app.progress(porcentaje_ahorro)
+
+# --- 4. PESTAÑA RESUMEN (CALENDARIO CORREGIDO) ---
+with tabs[3]:
+    if not df_mov.empty and str_app.button(T["undo_btn"]):
+        df_mov[:-1].to_csv(FILE_DB, index=False); str_app.rerun()
+    
+    str_app.metric(T["cap_total"], f"${total_capital:,.0f}".replace(",", "."))
     
     # --- ANÁLISIS ESTRUCTURAL POR CATEGORÍAS ---
-    str_app.divider()
     str_app.subheader("📊 Análisis Estructural")
     df_gastos = df_mov[df_mov["TIPO"] == "GASTO"].copy()
     resumen_cat = df_gastos.groupby("CATEGORIA")["MONTO"].sum() if not df_gastos.empty else {}
@@ -204,7 +205,7 @@ with tabs[2]:
     datos_dias = {d: 0 for d in range(1, 32)}
     detalle_dias = {d: [] for d in range(1, 32)}
     
-    # Reglas de Mapeo del Calendario
+    # REGLAS 1 Y 2: Solo ingresos y gastos diarios de este mes se muestran en su fecha de registro
     df_mes_ingresados = df_mov[(df_mov['FECHA_DT'].dt.year == hoy.year) & (df_mov['FECHA_DT'].dt.month == hoy.month)]
     for _, fila in df_mes_ingresados.iterrows():
         if fila['CATEGORIA'] == "GASTOS DIARIOS" or fila['TIPO'] == "INGRESO":
@@ -215,11 +216,13 @@ with tabs[2]:
             else:
                 datos_dias[d_real] = 1 if datos_dias[d_real] == 0 else 3
 
+    # REGLA 3 CORREGIDA: Buscar vencimientos en toda la BD histórica para agendarlos exclusivamente en su día de vencimiento de este mes
     for _, fila in df_mov.iterrows():
         if "[Vence: " in str(fila['DESC']):
             try:
                 f_venc_str = str(fila['DESC']).split("[Vence: ")[1].replace("]", "").strip()
                 f_venc_dt = datetime.strptime(f_venc_str, "%Y-%m-%d")
+                # Validar que el vencimiento corresponda al mes y año actual en pantalla
                 if f_venc_dt.year == hoy.year and f_venc_dt.month == hoy.month:
                     d_venc = f_venc_dt.day
                     limpio_desc = fila['DESC'].split(" [")[0]
@@ -279,8 +282,8 @@ with tabs[2]:
     else:
         str_app.warning("Selecciona haciendo clic arriba en cualquier fila del calendario para cargar dinámicamente el desglose de los días.")
 
-# --- 4. PESTAÑA IA ---
-with tabs[3]:
+# --- 5. PESTAÑA IA ---
+with tabs[4]:
     api_key = str_app.secrets.get("GROQ_API_KEY")
     if api_key:
         client = Groq(api_key=api_key)
